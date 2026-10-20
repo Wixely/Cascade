@@ -1,6 +1,6 @@
 # Instructions for agents
 
-Cascade is currently a plan-only repository for a deterministic vector virtual machine.
+Cascade contains a runnable v0.1 MVP of a deterministic vector virtual machine.
 
 ## Before starting work
 

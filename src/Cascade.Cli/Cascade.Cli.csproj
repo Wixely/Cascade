@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <PublishAot>true</PublishAot>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <AssemblyName>cascade</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Cascade.Core\Cascade.Core.csproj" />
+    <ProjectReference Include="..\Cascade.Runtime\Cascade.Runtime.csproj" />
+  </ItemGroup>
+</Project>

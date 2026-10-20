@@ -1,0 +1,30 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build",
+      "type": "process",
+      "command": "dotnet",
+      "args": ["build", "${workspaceFolder}/Cascade.sln"],
+      "problemMatcher": "$msCompile",
+      "group": { "kind": "build", "isDefault": true }
+    },
+    {
+      "label": "conformance",
+      "type": "process",
+      "command": "dotnet",
+      "args": ["run", "--project", "${workspaceFolder}/tests/Cascade.Runtime.Conformance"],
+      "problemMatcher": "$msCompile",
+      "group": "test"
+    },
+    {
+      "label": "prepare sample",
+      "type": "process",
+      "command": "dotnet",
+      "args": ["run", "--project", "${workspaceFolder}/src/Cascade.Cli", "--no-build", "--", "sample", "${workspaceFolder}/sample.cvm"],
+      "dependsOn": "build",
+      "dependsOrder": "sequence",
+      "problemMatcher": "$msCompile"
+    }
+  ]
+}

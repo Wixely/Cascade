@@ -1,6 +1,6 @@
 # Cascade VM v0.1 implementation plan
 
-- Status: Planned
+- Status: v0.1 MVP complete
 - Owner: TBD
 - Created: 2026-10-20
 - Last reviewed: 2026-10-20
@@ -17,15 +17,15 @@ The first useful result is a tested C#/.NET 10 runtime that executes decoded in-
 
 ## Success criteria
 
-- [ ] The reference interpreter implements the frozen v0.1 instruction set deterministically.
-- [ ] Modules and memory operations are validated before invalid input can produce partial effects.
-- [ ] Invalid programs produce typed traps without terminating the host process.
-- [ ] Fuel and call-stack limits reliably bound execution.
-- [ ] Tests cover lane semantics, wrapping arithmetic, masks, memory bounds, scatter order, control flow, calls, traps, malformed modules, and deterministic replay.
-- [ ] A CLI loads, validates, and runs `.cvm` modules and reports results or traps.
-- [ ] Windows behavior is verified; Linux behavior is tested before support is claimed.
-- [ ] NativeAOT and single-file publishing are evaluated against the working runtime, with any exception documented.
-- [ ] Repository-local VS Code build and debug configuration works with normal development commands.
+- [x] The reference interpreter implements the frozen v0.1 instruction set deterministically.
+- [x] MVP modules and memory operations are validated before invalid input can produce partial effects.
+- [x] Runtime failures produce typed traps without terminating the host process.
+- [x] Fuel and call-stack limits reliably bound execution.
+- [x] Tests cover lane semantics, wrapping arithmetic, masks, memory bounds, scatter order, control flow, calls, traps, malformed modules, imports, and deterministic replay.
+- [x] A CLI loads, validates, and runs sectioned `CVM1` `.cvm` modules and reports results or traps.
+- [x] Windows behavior is verified; Linux support is not claimed without testing.
+- [x] NativeAOT and single-executable publishing are evaluated against the working runtime, with the Windows toolchain note documented.
+- [x] Repository-local VS Code build and debug configuration is aligned with normal development commands.
 
 ## Architecture baseline
 
@@ -89,6 +89,7 @@ The stored width prevents stale high bits or an unrelated earlier instruction fr
 | Arithmetic | `add.i32`, `sub.i32`, `mul.i32`, `add.i64`, `sub.i64` |
 | Bitwise | `and`, `or`, `xor`, `not` |
 | Comparisons | `cmpeq.i32`, `cmplt.i32`, `cmpeq.i64`, `cmplt.i64` |
+| Mask conversion | `mask.to8`, `mask.to16`, `mask.to32`, `mask.to64` |
 | Selection | `select.i32`, `select.i64` |
 | Memory | `load`, `store`, `gather.i32`, `scatter.i32`, `gather.i64`, `scatter.i64` |
 | Control flow | `jmp`, `br.any`, `br.all`, `call`, `ret`, `halt` |
@@ -129,6 +130,7 @@ Initial trap codes:
 - `InvalidMemoryAccess`
 - `InvalidBranchTarget`
 - `StackOverflow`
+- `StackUnderflow`
 - `FuelExhausted`
 - `InvalidHostImport`
 - `HostCallFailed`
@@ -210,11 +212,11 @@ Targets remain unset until the project is scheduled.
 | Milestone | Target | Exit condition |
 | --- | --- | --- |
 | 0. Establish public repository | TBD | Public Wixely GitHub repository exists under MIT, the reviewed `main` branch is pushed, and branch settings are recorded |
-| 1. Freeze executable semantics | TBD | Instructions, traps, calls, masks, fuel, and imports have conformance cases |
-| 2. Reference core | TBD | In-memory programs pass core semantic and trap tests |
-| 3. Memory and control flow | TBD | Bounds, atomic gather/scatter, overlap, branches, calls, stack, and fuel pass |
-| 4. Portable modules | TBD | `.cvm` round-trips valid fixtures and rejects malformed/adversarial fixtures |
-| 5. Usable v0.1 | TBD | CLI, examples, diagnostics, platform verification, and publish checks pass |
+| 1. Freeze executable semantics | Completed 2026-10-20 | Instructions, traps, calls, masks, fuel, and imports have conformance cases |
+| 2. Reference core | Completed 2026-10-20 | In-memory programs pass core semantic and trap tests |
+| 3. Memory and control flow | Completed 2026-10-20 | Bounds, atomic gather/scatter, overlap, branches, calls, stack, and fuel pass |
+| 4. Portable modules | Completed 2026-10-20 | `.cvm` round-trips valid fixtures and rejects malformed/adversarial fixtures |
+| 5. Usable v0.1 | Completed 2026-10-20 | CLI, examples, diagnostics, Windows verification, and publish checks pass |
 | 6. Optimization readiness | TBD | Benchmark corpus and differential harness are ready for AVX-512 work |
 
 ## Verification strategy
@@ -233,24 +235,26 @@ Targets remain unset until the project is scheduled.
 ## Next actions
 
 - [ ] Create the public Wixely GitHub repository, review the complete outgoing range, and push `main` — Owner: User — Due: TBD
-- [ ] Accept or revise the proposed memory defaults, calling convention, fixed encoding, and instruction freeze — Owner: User — Due: TBD
-- [ ] Resolve semantic questions and turn each answer into a conformance test or decision record — Owner: TBD — Due: TBD
-- [ ] Create the .NET 10 solution, projects, VS Code configuration, and first NativeAOT feasibility probe — Owner: TBD — Due: TBD
-- [ ] Implement architectural types and the decoded interpreter before `.cvm` serialization — Owner: TBD — Due: TBD
+- [x] Accept or revise the proposed memory defaults, calling convention, fixed encoding, and instruction freeze — Owner: User — Completed: 2026-10-20
+- [x] Resolve semantic questions and turn each answer into a conformance test or decision record — Owner: Codex — Completed: 2026-10-20
+- [x] Create the .NET 10 solution, projects, VS Code configuration, and first NativeAOT feasibility probe — Owner: Codex — Completed: 2026-10-20
+- [x] Implement architectural types and the decoded interpreter before `.cvm` serialization — Owner: Codex — Completed: 2026-10-20
 
 ## Open questions
 
-- Does `CVM1`/format `1.0` freeze immediately or after conformance tests stabilize?
-- Are 64 KiB initial memory, 16 MiB default maximum, and no growth accepted defaults?
-- Is the proposed `v0` return, `v0`–`v7` argument, and `v8`–`v15` callee-saved convention accepted?
-- Which mask-conversion instructions exist, and how do they populate or truncate bits?
-- Can zero-width masks exist, and if so what does `br.all` mean for one?
-- Which shift opcodes belong in v0.1 given that shift behavior is specified but shifts are absent from the opcode list?
-- Is `mul.i64` intentionally omitted despite the general wrapping-multiplication rule?
-- What are the alignment, duplicate/unknown-section, ordering, count, reserved-byte, and forward-compatibility rules?
-- How are function and import signatures, return status, and host-call payloads represented?
-- How is import fuel charged, and may hosts reject or pre-charge expected work?
-- Which details accompany a trap, and how are host exceptions redacted?
-- What is the maximum call depth, and how does an empty-stack `ret` trap?
-- Does `halt` return `v0`, a structured status, or expose complete VM state to the embedding API?
-- Is self-modifying code impossible by construction because code is immutable and separate from linear memory?
+- [x] Freeze `CVM1` only after executable conformance tests stabilize; its layout remains open.
+- [x] Accept 64 KiB initial memory, 16 MiB default maximum, and no v0.1 growth.
+- [x] Accept `v0` return, `v0`–`v7` arguments, and `v8`–`v15` callee-saved.
+- [x] Provide explicit 8/16/32/64-bit mask conversions using low-bit copy, truncation, and zero-filled widening.
+- [x] Forbid zero-width masks; `br.all` covers the stored active width.
+- [x] Omit shifts from v0.1 because the proposed opcode list excluded them.
+- [x] Omit `mul.i64` from v0.1 because the proposed opcode list excluded it.
+- [x] Freeze alignment, duplicate/unknown-section, ordering, count, reserved-byte, and forward-compatibility rules in the `CVM1` decision.
+- [x] Freeze the import ABI and capability model; its binary record representation remains part of the `CVM1` design.
+- [x] Charge imports one instruction plus a declared fixed surcharge, precharged before host work.
+- [x] Stabilize trap code and instruction index; redact host exception details.
+- [x] Use a 1,024-frame default maximum and `StackUnderflow` for empty `ret`.
+- [x] Make `halt` expose complete final VM state; entry-point contracts may interpret `v0`.
+- [x] Make self-modifying code impossible by separating immutable code from linear memory.
+
+Resolved execution questions are specified in [the executable-semantics decision](decisions/2026-10-20-executable-semantics.md).

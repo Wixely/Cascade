@@ -1,29 +1,55 @@
 # Cascade
 
-Cascade is a planned deterministic, portable vector virtual machine with 32 512-bit general-purpose registers, predicate masks, byte-addressable linear memory, and a versioned `.cvm` module format.
-
-The first implementation will use C# and .NET 10. It will establish correctness through a reference interpreter before adding a compiler, JIT, or AVX-512 backend.
+Cascade is a deterministic, portable vector virtual machine with 32 512-bit
+general-purpose registers, eight predicate masks, fixed byte-addressable linear
+memory, and a correctness-first reference interpreter.
 
 ## Status
 
-- Phase: Planning
-- Implementation: Not started
-- Intended repository: Public GitHub repository under Wixely; remote not yet created
+- Phase: Complete v0.1 MVP
+- Implementation: C# on .NET 10
+- Backend: Hardware-independent reference interpreter
+- Module container: Sectioned `CVM1` version `1.0`
+- Verified platform: Windows x64
 - License: [MIT](LICENSE)
-- Plan captured: 2026-10-20
 - Last reviewed: 2026-10-20
 
-## Start here
+The MVP implements data, arithmetic, bitwise, comparison, mask conversion,
+selection, memory, branch, call, return, constant, host-call, and halt instructions. Execution is
+bounded by fuel and call depth; invalid memory operations produce typed traps;
+gather/scatter addresses are checked before effects occur.
 
+## Build and run
+
+```powershell
+dotnet build Cascade.sln
+dotnet run --project tests\Cascade.Runtime.Conformance
+dotnet run --project src\Cascade.Cli -- sample sample.cvm
+dotnet run --project src\Cascade.Cli -- run sample.cvm
+```
+
+The sample halts with every `v0.i64` lane set to `42`. The repository-local VS
+Code build task, conformance task, and CLI debug configuration use the same
+commands.
+
+NativeAOT publishing on Windows x64:
+
+```powershell
+$env:Path = 'C:\Program Files (x86)\Microsoft Visual Studio\Installer;' + $env:Path
+dotnet publish src\Cascade.Cli -c Release -r win-x64 --self-contained true -o artifacts\publish\win-x64
+```
+
+The temporary `PATH` addition is needed only when `vswhere.exe` is installed in
+the standard Visual Studio Installer directory but is not already discoverable.
+
+## Documentation
+
+- [MVP behavior and limitations](docs/mvp.md)
 - [Implementation plan](docs/plan.md)
 - [Project preferences](docs/preferences.md)
 - [Decision records](docs/decisions/README.md)
 - [Agent instructions](AGENTS.md)
 
-The supplied source specification ended partway through a draft `VmState.Memory` declaration. The plan captures all complete architectural material and does not infer the missing implementation text.
-
-## Current next action
-
-Create the public Wixely GitHub repository, add its remote, perform the complete pre-push privacy review, and publish the existing `main` branch.
-
-No VS Code debug configuration exists yet because the repository contains no runnable project. Creating and verifying it is part of the solution-bootstrap milestone.
+The source specification supplied before implementation ended partway through a
+draft `VmState.Memory` declaration. The implementation does not infer that
+missing text; completed choices are recorded in the decision history.
