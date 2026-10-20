@@ -26,6 +26,7 @@ dotnet build Cascade.sln
 dotnet run --project tests\Cascade.Runtime.Conformance
 dotnet run --project src\Cascade.Cli -- sample sample.cvm
 dotnet run --project src\Cascade.Cli -- run sample.cvm
+dotnet run --project examples\Cascade.Demos
 ```
 
 The sample halts with every `v0.i64` lane set to `42`. The repository-local VS
@@ -53,6 +54,7 @@ eng\verify-linux.ps1 -RequireNativeAot
 ## Documentation
 
 - [MVP behavior and limitations](docs/mvp.md)
+- [Runnable demos](examples/README.md)
 - [Embedding API](docs/embedding.md)
 - [Post-MVP engineering status](docs/post-mvp.md)
 - [Implementation plan](docs/plan.md)

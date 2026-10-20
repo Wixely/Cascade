@@ -27,6 +27,14 @@
       "problemMatcher": "$msCompile"
     },
     {
+      "label": "demos",
+      "type": "process",
+      "command": "dotnet",
+      "args": ["run", "--project", "${workspaceFolder}/examples/Cascade.Demos", "--", "all"],
+      "problemMatcher": "$msCompile",
+      "group": "test"
+    },
+    {
       "label": "differential",
       "type": "process",
       "command": "dotnet",
