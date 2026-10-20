@@ -61,21 +61,15 @@ These are the relevant working preferences copied into Cascade so the repository
 
 ### Hosting boundary
 
-- Status: Open decision
-- Preference: Use GitHub only for an intentional open-source release; use the local GitLab for private closed-source work.
-- Notes: Cascade is currently local only. Do not add a remote or license until the user chooses its disclosure model.
+- Status: Confirmed for Cascade
+- Preference: Publish Cascade as an open-source GitHub repository under Wixely.
+- Notes: Confirmed by the user on 2026-10-20. The remote repository has not yet been created.
 
-### GitHub identity and release defaults
+### GitHub identity, license, and release defaults
 
-- Status: Conditional confirmed defaults
-- Preference: If Cascade becomes a Wixely GitHub repository, use the repository-local identity `Wixely <5593644+Wixely@users.noreply.github.com>` and normally prefer the MIT license.
+- Status: Confirmed for Cascade
+- Preference: Use the repository-local identity `Wixely <5593644+Wixely@users.noreply.github.com>` and publish under the MIT license.
 - Notes: Review the exact outgoing range before every push. GitHub Actions uploads must set purpose-specific short `retention-days`; durable files belong in GitHub Releases. Release archives should omit PDBs and other files users do not need, and releases must include meaningful notes.
-
-### Private GitLab access
-
-- Status: Conditional confirmed default
-- Preference: If Cascade becomes a local GitLab project, keep it private and grant the `agents` group the Developer role.
-- Notes: Verify effective access and preserve it through later permission changes.
 
 ## Privacy and completion
 

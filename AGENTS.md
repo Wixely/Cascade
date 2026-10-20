@@ -24,7 +24,7 @@ Cascade is currently a plan-only repository for a deterministic vector virtual m
 
 ## Project boundaries
 
-- Do not add a remote, choose GitHub or GitLab, change visibility, or add a license without an explicit decision.
+- Cascade is intended to be a public Wixely GitHub project using the MIT license. Do not change its host, owner, visibility, or license without an explicit superseding decision.
 - Do not add compiler, assembler, JIT, AVX-512, or dynamic-memory-growth work to v0.1 unless the plan is updated deliberately.
 - Host imports are explicit capabilities. Do not grant modules ambient filesystem, network, process, environment, clock, or randomness access.
 - Preserve decision history by adding a dated record under `docs/decisions/` rather than silently rewriting an accepted decision.
@@ -34,8 +34,7 @@ Cascade is currently a plan-only repository for a deterministic vector virtual m
 
 - Never commit secrets or credentials.
 - Before any push, inspect the complete outgoing range, metadata, filenames, text, binaries, and generated artifacts for sensitive or identifying information.
-- If this becomes a Wixely GitHub repository, configure the repository-local commit identity to `Wixely <5593644+Wixely@users.noreply.github.com>` before creating outgoing commits.
-- If this becomes a private local GitLab project, grant the `agents` group the Developer role and verify effective access.
+- Use the repository-local commit identity `Wixely <5593644+Wixely@users.noreply.github.com>` for every commit intended for GitHub.
 
 ## Completion handoff
 

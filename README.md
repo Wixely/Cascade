@@ -8,8 +8,8 @@ The first implementation will use C# and .NET 10. It will establish correctness 
 
 - Phase: Planning
 - Implementation: Not started
-- Repository host: Local only; GitHub versus private GitLab is undecided
-- License: Undecided
+- Intended repository: Public GitHub repository under Wixely; remote not yet created
+- License: [MIT](LICENSE)
 - Plan captured: 2026-10-20
 - Last reviewed: 2026-10-20
 
@@ -24,6 +24,6 @@ The supplied source specification ended partway through a draft `VmState.Memory`
 
 ## Current next action
 
-Decide whether Cascade is intended to be public on GitHub or private on the local GitLab, then record the host, ownership, and license before implementation begins.
+Create the public Wixely GitHub repository, add its remote, perform the complete pre-push privacy review, and publish the existing `main` branch.
 
 No VS Code debug configuration exists yet because the repository contains no runnable project. Creating and verifying it is part of the solution-bootstrap milestone.

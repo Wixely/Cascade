@@ -5,7 +5,8 @@
 - Created: 2026-10-20
 - Last reviewed: 2026-10-20
 - Target date: None
-- Repository host: Local only; remote host undecided
+- Intended repository: Public GitHub repository under Wixely; remote not yet created
+- License: MIT
 - Source: User-supplied "Cascade VM v0.1 — Technical Specification"
 
 ## Outcome
@@ -180,7 +181,7 @@ The decoded `Instruction` type is distinct from the 16-byte disk record. Execute
 - Validate untrusted lengths and offsets before allocating or executing.
 - Imports are explicit capabilities; modules receive no ambient filesystem, network, process, environment, clock, or randomness access.
 - Follow [project preferences](preferences.md), including the Python/Node.js prohibition.
-- Hosting, visibility, organization ownership, and license remain undecided.
+- Creating the public GitHub repository and pushing remain separate external actions requiring a complete pre-push review.
 
 ## Assumptions
 
@@ -208,7 +209,7 @@ Targets remain unset until the project is scheduled.
 
 | Milestone | Target | Exit condition |
 | --- | --- | --- |
-| 0. Resolve project boundary | TBD | Host, visibility, ownership, license, and decision owners are recorded |
+| 0. Establish public repository | TBD | Public Wixely GitHub repository exists under MIT, the reviewed `main` branch is pushed, and branch settings are recorded |
 | 1. Freeze executable semantics | TBD | Instructions, traps, calls, masks, fuel, and imports have conformance cases |
 | 2. Reference core | TBD | In-memory programs pass core semantic and trap tests |
 | 3. Memory and control flow | TBD | Bounds, atomic gather/scatter, overlap, branches, calls, stack, and fuel pass |
@@ -231,7 +232,7 @@ Targets remain unset until the project is scheduled.
 
 ## Next actions
 
-- [ ] Choose public GitHub or private local GitLab, then record ownership and license — Owner: User — Due: TBD
+- [ ] Create the public Wixely GitHub repository, review the complete outgoing range, and push `main` — Owner: User — Due: TBD
 - [ ] Accept or revise the proposed memory defaults, calling convention, fixed encoding, and instruction freeze — Owner: User — Due: TBD
 - [ ] Resolve semantic questions and turn each answer into a conformance test or decision record — Owner: TBD — Due: TBD
 - [ ] Create the .NET 10 solution, projects, VS Code configuration, and first NativeAOT feasibility probe — Owner: TBD — Due: TBD
@@ -239,7 +240,6 @@ Targets remain unset until the project is scheduled.
 
 ## Open questions
 
-- Is Cascade intended to be open-source on GitHub or private on the local GitLab?
 - Does `CVM1`/format `1.0` freeze immediately or after conformance tests stabilize?
 - Are 64 KiB initial memory, 16 MiB default maximum, and no growth accepted defaults?
 - Is the proposed `v0` return, `v0`–`v7` argument, and `v8`–`v15` callee-saved convention accepted?
