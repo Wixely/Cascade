@@ -2,6 +2,8 @@ using System.Buffers.Binary;
 using Cascade.Core;
 using Cascade.Runtime;
 
+if (args is ["--write-golden", var fixtureDirectory]) return WriteGoldenFixtures(fixtureDirectory);
+
 var tests = new (string Name, Action Body)[]
 {
     ("wrapping arithmetic and register aliasing", Arithmetic),
@@ -19,8 +21,11 @@ var tests = new (string Name, Action Body)[]
     ("call stack bounds execution", CallStack),
     ("empty return traps with stack underflow", EmptyReturn),
     ("mask widths are enforced", MaskWidth),
+    ("boundary accesses and invalid modules fail safely", BoundaryAndValidation),
     ("module format round trips and rejects malformed data", ModuleFormat),
+    ("golden CVM1 fixtures remain byte-stable", GoldenFixtures),
     ("constants and entry points execute", ConstantsAndEntryPoint),
+    ("embedding facade loads, saves, and isolates instances", EmbeddingFacade),
     ("host imports bind and precharge fuel", HostImports),
     ("host import failures are bounded and redacted", HostImportFailures),
     ("deterministic replay", Replay),
@@ -253,6 +258,33 @@ static void MaskWidth()
     Equal(TrapCode.InvalidInstruction, vm.Execute().Trap?.Code);
 }
 
+static void BoundaryAndValidation()
+{
+    var exact = VmWithOptions(new() { MemorySize = VectorRegister.ByteCount },
+        new(Opcode.Store, SourceA: 0, SourceB: 1),
+        new(Opcode.Load, Destination: 2, SourceA: 0),
+        new(Opcode.Halt));
+    exact.State.Register(1).WriteUInt64(0, 0xAABBCCDD);
+    Success(exact.Execute());
+    Equal(0xAABBCCDDUL, exact.State.Register(2).ReadUInt64(0));
+
+    foreach (var invalidAddress in new[] { 1UL, ulong.MaxValue })
+    {
+        var invalid = VmWithOptions(new() { MemorySize = VectorRegister.ByteCount },
+            new(Opcode.Store, SourceA: 0, SourceB: 1), new(Opcode.Halt));
+        invalid.State.Register(0).WriteUInt64(0, invalidAddress);
+        invalid.State.Register(1).WriteUInt64(0, 42);
+        Equal(TrapCode.InvalidMemoryAccess, invalid.Execute().Trap?.Code);
+        True(invalid.State.LinearMemory.Span.SequenceEqual(new byte[VectorRegister.ByteCount]), "Invalid store had a partial effect.");
+    }
+
+    HasValidationError(new CascadeModule([new(Opcode.Jump, Immediate: 2), new(Opcode.Halt)]), "Branch target");
+    HasValidationError(new CascadeModule([new(Opcode.Halt)], functions: [new(0, 1), new(0, 1)]), "overlaps");
+    var duplicate = new ImportDefinition("test", "same", 1, 1);
+    HasValidationError(new CascadeModule([new(Opcode.Halt)], imports: [duplicate, duplicate]), "duplicates");
+    HasValidationError(new CascadeModule([new(Opcode.LoadConstant, Immediate: 0), new(Opcode.Halt)]), "Constant index");
+}
+
 static void ModuleFormat()
 {
     var constantBytes = new byte[VectorRegister.ByteCount];
@@ -311,6 +343,22 @@ static void ModuleFormat()
     Equal(Opcode.Halt, extendedModule.Instructions[0].Opcode);
 }
 
+static void GoldenFixtures()
+{
+    var directory = Path.Combine(AppContext.BaseDirectory, "Fixtures");
+    foreach (var name in new[] { "minimal.cvm", "complete.cvm" })
+    {
+        var bytes = File.ReadAllBytes(Path.Combine(directory, name));
+        using var input = new MemoryStream(bytes, writable: false);
+        var module = CvmModuleFormat.Read(input);
+        using var output = new MemoryStream();
+        CvmModuleFormat.Write(output, module);
+        True(bytes.SequenceEqual(output.ToArray()), $"Golden fixture {name} changed.");
+        for (var length = 0; length < bytes.Length; length++)
+            Throws<InvalidDataException>(() => CvmModuleFormat.Read(new MemoryStream(bytes[..length])));
+    }
+}
+
 static void ConstantsAndEntryPoint()
 {
     var bytes = Enumerable.Repeat((byte)0xA5, VectorRegister.ByteCount).ToArray();
@@ -321,6 +369,23 @@ static void ConstantsAndEntryPoint()
     Success(vm.Execute());
     True(vm.State.Register(0).Bytes.SequenceEqual(bytes), "Entry point or constant load was incorrect.");
     Equal(2UL, vm.State.InitialFuel - vm.State.FuelRemaining);
+}
+
+static void EmbeddingFacade()
+{
+    var module = new CascadeModule([new(Opcode.SplatI64, Destination: 0, Immediate: 42), new(Opcode.Halt)]);
+    var program = CascadeProgram.FromModule(module);
+    using var encoded = new MemoryStream();
+    program.Save(encoded);
+    encoded.Position = 0;
+    var loaded = CascadeProgram.Load(encoded);
+    Equal(2, loaded.InstructionCount);
+    var first = loaded.Instantiate();
+    var second = loaded.Instantiate();
+    Success(first.Execute());
+    Success(second.Execute());
+    first.State.Register(0).WriteUInt64(0, 99);
+    Equal(42UL, second.State.Register(0).ReadUInt64(0));
 }
 
 static void HostImports()
@@ -396,6 +461,26 @@ static void Replay()
     Equal(first.State.FuelRemaining, second.State.FuelRemaining);
 }
 
+static int WriteGoldenFixtures(string directory)
+{
+    Directory.CreateDirectory(directory);
+    WriteFixture(Path.Combine(directory, "minimal.cvm"), new([new(Opcode.Halt)]));
+    var constant = Enumerable.Range(0, VectorRegister.ByteCount).Select(index => (byte)index).ToArray();
+    WriteFixture(Path.Combine(directory, "complete.cvm"), new(
+        [new(Opcode.LoadConstant, Destination: 0, Immediate: 0), new(Opcode.HostCall, Immediate: 0), new(Opcode.Halt)],
+        [new VectorConstant(constant)],
+        [new FunctionDefinition(0, 3)],
+        [new ImportDefinition("fixture", "noop", 1, 7)]));
+    Console.WriteLine($"Wrote golden fixtures to {directory}");
+    return 0;
+}
+
+static void WriteFixture(string path, CascadeModule module)
+{
+    using var output = File.Create(path);
+    CvmModuleFormat.Write(output, module);
+}
+
 static ReferenceInterpreter Vm(params Instruction[] instructions) => VmWithOptions(new(), instructions);
 static ReferenceInterpreter VmWithOptions(VmOptions options, params Instruction[] instructions) => new(new CascadeModule(instructions), options);
 static void Success(ExecutionResult result) => True(result.Succeeded, result.Trap?.Message ?? "VM did not halt successfully.");
@@ -407,4 +492,10 @@ static void Throws<T>(Action action) where T : Exception
     try { action(); }
     catch (T) { return; }
     throw new InvalidOperationException($"Expected {typeof(T).Name}.");
+}
+
+static void HasValidationError(CascadeModule module, string text)
+{
+    var errors = ModuleValidator.Validate(module);
+    True(errors.Any(error => error.Message.Contains(text, StringComparison.Ordinal)), $"Expected validation error containing '{text}'.");
 }

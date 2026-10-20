@@ -66,8 +66,6 @@ Load and validation errors return exit code `1`.
 - Shift instructions or `mul.i64`, which are described ambiguously or omitted
   from the proposed opcode list.
 - A compiler, assembler, JIT, AVX-512 backend, or dynamic memory growth.
-- Linux build, runtime, and NativeAOT verification.
-- A stable public embedding API or package.
 
 ## Verification
 
@@ -78,6 +76,11 @@ publish directory also contains an optional PDB that is not a runtime dependency
 and should be omitted from release archives. The
 Visual Studio Installer directory had to be added temporarily to `PATH` so the
 NativeAOT toolchain could discover `vswhere.exe`.
+
+The managed self-contained Linux x64 CLI, conformance suite, and differential
+harness are verified under Ubuntu 24.04.4 on WSL2. A Linux x64 NativeAOT CLI
+published with .NET SDK `10.0.113` and Clang `18.1.3` also executes the sample
+module successfully.
 
 ## Recommended next action
 

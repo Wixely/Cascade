@@ -6,4 +6,7 @@
     <ProjectReference Include="..\..\src\Cascade.Core\Cascade.Core.csproj" />
     <ProjectReference Include="..\..\src\Cascade.Runtime\Cascade.Runtime.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="..\Fixtures\*.cvm" Link="Fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

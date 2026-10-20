@@ -10,7 +10,7 @@ memory, and a correctness-first reference interpreter.
 - Implementation: C# on .NET 10
 - Backend: Hardware-independent reference interpreter
 - Module container: Sectioned `CVM1` version `1.0`
-- Verified platform: Windows x64
+- Verified platforms: Windows x64 and Linux x64, managed self-contained and NativeAOT
 - License: [MIT](LICENSE)
 - Last reviewed: 2026-10-20
 
@@ -32,7 +32,7 @@ The sample halts with every `v0.i64` lane set to `42`. The repository-local VS
 Code build task, conformance task, and CLI debug configuration use the same
 commands.
 
-NativeAOT publishing on Windows x64:
+NativeAOT publishing is verified on Windows x64:
 
 ```powershell
 $env:Path = 'C:\Program Files (x86)\Microsoft Visual Studio\Installer;' + $env:Path
@@ -42,9 +42,19 @@ dotnet publish src\Cascade.Cli -c Release -r win-x64 --self-contained true -o ar
 The temporary `PATH` addition is needed only when `vswhere.exe` is installed in
 the standard Visual Studio Installer directory but is not already discoverable.
 
+Linux x64 managed and NativeAOT verification is available through WSL. On
+Ubuntu 24.04, install `dotnet-sdk-10.0`, `clang`, `gcc`, and `zlib1g-dev`, then
+run:
+
+```powershell
+eng\verify-linux.ps1 -RequireNativeAot
+```
+
 ## Documentation
 
 - [MVP behavior and limitations](docs/mvp.md)
+- [Embedding API](docs/embedding.md)
+- [Post-MVP engineering status](docs/post-mvp.md)
 - [Implementation plan](docs/plan.md)
 - [Project preferences](docs/preferences.md)
 - [Decision records](docs/decisions/README.md)

@@ -25,6 +25,37 @@
       "dependsOn": "build",
       "dependsOrder": "sequence",
       "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "differential",
+      "type": "process",
+      "command": "dotnet",
+      "args": ["run", "--project", "${workspaceFolder}/tests/Cascade.Runtime.Differential"],
+      "problemMatcher": "$msCompile",
+      "group": "test"
+    },
+    {
+      "label": "benchmarks quick",
+      "type": "process",
+      "command": "dotnet",
+      "args": ["run", "--project", "${workspaceFolder}/tools/Cascade.Benchmarks", "-c", "Release", "--", "--quick"],
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "verify packages",
+      "type": "process",
+      "command": "powershell.exe",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/eng/verify-packages.ps1"],
+      "problemMatcher": "$msCompile",
+      "group": "test"
+    },
+    {
+      "label": "verify Linux managed",
+      "type": "process",
+      "command": "powershell.exe",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/eng/verify-linux.ps1"],
+      "problemMatcher": "$msCompile",
+      "group": "test"
     }
   ]
 }

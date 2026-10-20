@@ -23,7 +23,7 @@ The first useful result is a tested C#/.NET 10 runtime that executes decoded in-
 - [x] Fuel and call-stack limits reliably bound execution.
 - [x] Tests cover lane semantics, wrapping arithmetic, masks, memory bounds, scatter order, control flow, calls, traps, malformed modules, imports, and deterministic replay.
 - [x] A CLI loads, validates, and runs sectioned `CVM1` `.cvm` modules and reports results or traps.
-- [x] Windows behavior is verified; Linux support is not claimed without testing.
+- [x] Windows and Linux x64 behavior are verified with managed self-contained and NativeAOT builds.
 - [x] NativeAOT and single-executable publishing are evaluated against the working runtime, with the Windows toolchain note documented.
 - [x] Repository-local VS Code build and debug configuration is aligned with normal development commands.
 
@@ -217,7 +217,7 @@ Targets remain unset until the project is scheduled.
 | 3. Memory and control flow | Completed 2026-10-20 | Bounds, atomic gather/scatter, overlap, branches, calls, stack, and fuel pass |
 | 4. Portable modules | Completed 2026-10-20 | `.cvm` round-trips valid fixtures and rejects malformed/adversarial fixtures |
 | 5. Usable v0.1 | Completed 2026-10-20 | CLI, examples, diagnostics, Windows verification, and publish checks pass |
-| 6. Optimization readiness | TBD | Benchmark corpus and differential harness are ready for AVX-512 work |
+| 6. Optimization readiness | Completed 2026-10-20 | Benchmark corpus and differential harness are ready for optimized-backend work |
 
 ## Verification strategy
 
@@ -239,10 +239,12 @@ Targets remain unset until the project is scheduled.
 - [x] Resolve semantic questions and turn each answer into a conformance test or decision record — Owner: Codex — Completed: 2026-10-20
 - [x] Create the .NET 10 solution, projects, VS Code configuration, and first NativeAOT feasibility probe — Owner: Codex — Completed: 2026-10-20
 - [x] Implement architectural types and the decoded interpreter before `.cvm` serialization — Owner: Codex — Completed: 2026-10-20
+- [x] Add golden `CVM1` fixtures, a stable embedding facade, packages, benchmark corpora, and a differential harness — Owner: Codex — Completed: 2026-10-20
+- [x] Verify NativeAOT publish and execution on Linux — Owner: Codex — Completed: 2026-10-20
 
 ## Open questions
 
-- [x] Freeze `CVM1` only after executable conformance tests stabilize; its layout remains open.
+- [x] Freeze `CVM1` only after executable conformance tests stabilize; its layout is recorded in the accepted format decision.
 - [x] Accept 64 KiB initial memory, 16 MiB default maximum, and no v0.1 growth.
 - [x] Accept `v0` return, `v0`–`v7` arguments, and `v8`–`v15` callee-saved.
 - [x] Provide explicit 8/16/32/64-bit mask conversions using low-bit copy, truncation, and zero-filled widening.

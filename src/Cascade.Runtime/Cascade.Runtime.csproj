@@ -1,5 +1,16 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <PackageId>Wixely.Cascade.Runtime</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>Wixely</Authors>
+    <Description>Reference interpreter and embedding API for the Cascade deterministic vector VM.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>virtual-machine;simd;deterministic;vector;interpreter</PackageTags>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Cascade.Core\Cascade.Core.csproj" />
+    <None Include="..\..\docs\embedding.md" Pack="true" PackagePath="README.md" />
   </ItemGroup>
 </Project>

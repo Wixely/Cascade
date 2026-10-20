@@ -1,1 +1,15 @@
-<Project Sdk="Microsoft.NET.Sdk" />
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <PackageId>Wixely.Cascade.Core</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>Wixely</Authors>
+    <Description>Architectural types and module model for the Cascade deterministic vector VM.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>virtual-machine;simd;deterministic;vector</PackageTags>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="..\..\docs\core-package.md" Pack="true" PackagePath="README.md" />
+  </ItemGroup>
+</Project>
