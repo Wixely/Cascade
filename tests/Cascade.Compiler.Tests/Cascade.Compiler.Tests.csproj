@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Cascade.Compiler\Cascade.Compiler.csproj" />
+    <ProjectReference Include="..\..\src\Cascade.Runtime\Cascade.Runtime.csproj" />
+  </ItemGroup>
+</Project>

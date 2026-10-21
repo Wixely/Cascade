@@ -8,9 +8,9 @@
 
 The CLI, conformance suite, and differential harness were cross-published as
 self-contained `linux-x64` applications and executed under Ubuntu 24.04.4 on
-WSL2. All 23 conformance cases passed, all four differential corpus cases
-matched, the harness detected a deliberate divergence, and the CLI wrote and ran
-a `CVM1` module.
+WSL2. All 25 runtime conformance cases and four compiler cases passed, all five
+differential corpus cases matched, the harness detected a deliberate divergence,
+and the CLI compiled `.cascade` source and ran the resulting `CVM1` module.
 
 Linux NativeAOT publishing and execution are verified in the same environment
 with .NET SDK `10.0.113`, Clang `18.1.3`, GCC `13.3.0`, and `zlib1g-dev`. The
@@ -72,7 +72,7 @@ performance guarantee.
 `CascadeInstance.Restart` supports this kernel pattern by resetting control
 state and fuel while preserving registers and linear memory. The instance and
 dispatch overhead is now lower, but the remaining scalar gap shows that
-per-instruction dispatch dominates short, 18-instruction invocations.
+per-instruction dispatch dominates short kernel invocations.
 
 ```powershell
 eng\verify-packages.ps1
@@ -81,11 +81,27 @@ dotnet run --project tests\Cascade.Runtime.Differential -c Release
 dotnet run --project tools\Cascade.Benchmarks -c Release -- --quick
 ```
 
+## Typed kernel compiler
+
+`Cascade.Compiler` implements version 0.1 of the `.cascade` source language and
+the CLI compiles source directly to `CVM1`. The compiler performs parsing,
+static lane-type checking, deterministic register allocation, and lowering
+without dynamic code generation or external parser dependencies. See [Cascade
+kernel language](language.md).
+
+The Game of Life demo now treats `life-rule.cascade` as its source of truth. At
+startup it recompiles the source and requires byte-for-byte equality with the
+committed `life-rule.cvm` before running either backend.
+
 ## Recommended next action
 
-Design and measure a batched kernel API that amortizes interpreter dispatch
-across many independent 16-lane batches before considering CPU-specific AVX2 or
-AVX-512 code — Owner: TBD — Due: TBD.
+Design typed memory operations, functions, and bounded control flow for source
+language version 0.2, using executable semantic tests before expanding the
+parser — Owner: TBD — Due: TBD.
+
+The independent runtime-performance action remains designing and measuring a
+batched kernel API before considering CPU-specific AVX2 or AVX-512 code — Owner:
+TBD — Due: TBD.
 
 Release remains a separate user-owned action: perform the privacy review, create
 the public Wixely GitHub repository, and publish the reviewed v0.1 work — Owner:

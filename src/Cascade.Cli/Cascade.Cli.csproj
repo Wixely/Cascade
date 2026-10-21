@@ -6,6 +6,7 @@
     <AssemblyName>cascade</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="..\Cascade.Compiler\Cascade.Compiler.csproj" />
     <ProjectReference Include="..\Cascade.Core\Cascade.Core.csproj" />
     <ProjectReference Include="..\Cascade.Runtime\Cascade.Runtime.csproj" />
   </ItemGroup>

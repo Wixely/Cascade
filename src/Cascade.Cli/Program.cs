@@ -1,10 +1,13 @@
 using Cascade.Core;
+using Cascade.Compiler;
 using Cascade.Runtime;
 
 return args switch
 {
     ["run", var path] => Run(path, ExecutionBackend.Reference),
     ["run", var path, "--backend", var backend] => ParseBackend(path, backend),
+    ["compile", var sourcePath] => Compile(sourcePath, Path.ChangeExtension(sourcePath, ".cvm")),
+    ["compile", var sourcePath, "-o", var outputPath] => Compile(sourcePath, outputPath),
     ["sample", var path] => WriteSample(path),
     _ => Usage(),
 };
@@ -71,10 +74,36 @@ static int WriteSample(string path)
     }
 }
 
+static int Compile(string sourcePath, string outputPath)
+{
+    try
+    {
+        var result = CascadeCompiler.Compile(File.ReadAllText(sourcePath));
+        if (!result.Succeeded)
+        {
+            foreach (var diagnostic in result.Diagnostics)
+                Console.Error.WriteLine($"{sourcePath}({diagnostic.Line},{diagnostic.Column}): error {diagnostic.Code}: {diagnostic.Message}");
+            return 1;
+        }
+
+        var program = CascadeProgram.FromModule(result.Module!);
+        using var output = File.Create(outputPath);
+        program.Save(output);
+        Console.WriteLine($"compiled {sourcePath} -> {outputPath} ({program.InstructionCount} instructions)");
+        return 0;
+    }
+    catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+    {
+        Console.Error.WriteLine($"error: {exception.Message}");
+        return 1;
+    }
+}
+
 static int Usage()
 {
     Console.WriteLine("Cascade VM MVP");
     Console.WriteLine("usage:");
+    Console.WriteLine("  cascade compile <file.cascade> [-o <file.cvm>]");
     Console.WriteLine("  cascade sample <file.cvm>  Write a sample module");
     Console.WriteLine("  cascade run <file.cvm>     Validate and execute a module");
     Console.WriteLine("  cascade run <file.cvm> --backend <reference|simd|auto>");

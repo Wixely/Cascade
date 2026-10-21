@@ -1,0 +1,23 @@
+// Conway's Game of Life, evaluated for 16 cells in parallel.
+// Kernel parameters are assigned to v0-v8 in declaration order.
+kernel life(
+    vector<i32> alive,
+    vector<i32> northWest,
+    vector<i32> north,
+    vector<i32> northEast,
+    vector<i32> west,
+    vector<i32> east,
+    vector<i32> southWest,
+    vector<i32> south,
+    vector<i32> southEast
+) -> vector<i32> {
+    let neighbors = northWest + north + northEast + west + east + southWest + south + southEast;
+
+    // A cell is born with exactly three neighbors.
+    let born = select(neighbors == 3, 1, 0);
+
+    // A live cell survives with exactly two neighbors.
+    let survives = select(neighbors == 2, alive, 0);
+
+    return born | survives;
+}

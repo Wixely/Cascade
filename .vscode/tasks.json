@@ -35,6 +35,21 @@
       "group": "test"
     },
     {
+      "label": "compiler tests",
+      "type": "process",
+      "command": "dotnet",
+      "args": ["run", "--project", "${workspaceFolder}/tests/Cascade.Compiler.Tests"],
+      "problemMatcher": "$msCompile",
+      "group": "test"
+    },
+    {
+      "label": "compile Game of Life kernel",
+      "type": "process",
+      "command": "dotnet",
+      "args": ["run", "--project", "${workspaceFolder}/src/Cascade.Cli", "--", "compile", "${workspaceFolder}/examples/Cascade.GameOfLife/life-rule.cascade", "-o", "${workspaceFolder}/examples/Cascade.GameOfLife/life-rule.cvm"],
+      "problemMatcher": "$msCompile"
+    },
+    {
       "label": "Game of Life demo",
       "type": "process",
       "command": "dotnet",

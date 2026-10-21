@@ -1,13 +1,15 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
-using Cascade.Core;
+using Cascade.Compiler;
 using Cascade.Runtime;
 
 if (args is ["--write-module", var outputPath])
 {
+    var bundledSourcePath = Path.Combine(AppContext.BaseDirectory, "life-rule.cascade");
+    var compiled = CompileKernel(bundledSourcePath);
     using var output = File.Create(outputPath);
-    CascadeProgram.FromModule(BuildLifeRuleModule()).Save(output);
-    Console.WriteLine($"Wrote Cascade Game of Life kernel to {outputPath}");
+    compiled.Save(output);
+    Console.WriteLine($"Compiled {bundledSourcePath} to {outputPath}");
     return 0;
 }
 
@@ -30,12 +32,14 @@ catch (ArgumentException exception)
     return 2;
 }
 
+var sourcePath = Path.Combine(AppContext.BaseDirectory, "life-rule.cascade");
 var modulePath = Path.Combine(AppContext.BaseDirectory, "life-rule.cvm");
-var expectedModule = Encode(BuildLifeRuleModule());
+var compiledProgram = CompileKernel(sourcePath);
+var expectedModule = Encode(compiledProgram);
 var storedModule = File.ReadAllBytes(modulePath);
 if (!storedModule.SequenceEqual(expectedModule))
 {
-    Console.Error.WriteLine("life-rule.cvm does not match the readable instruction definition in Program.cs.");
+    Console.Error.WriteLine("life-rule.cvm does not match the compiled life-rule.cascade source.");
     return 1;
 }
 
@@ -89,7 +93,7 @@ if (options.VerifyReplay)
 
 var cellUpdates = checked((long)options.Width * options.Height * options.Generations);
 Console.WriteLine($"Cascade Game of Life: {options.Width}x{options.Height}, {options.Generations} generations");
-Console.WriteLine("Kernel: portable life-rule.cvm, 18 instructions, 16 i32 lanes per VM batch");
+Console.WriteLine($"Kernel: life-rule.cascade -> life-rule.cvm, {program.InstructionCount} instructions, 16 i32 lanes per VM batch");
 if (options.Display)
 {
     Console.WriteLine("Initial state:");
@@ -114,35 +118,6 @@ Console.WriteLine($"State SHA-256: {Hash(result)}");
 Console.WriteLine($"PASS scalar cross-check{(options.VerifyReplay ? " and deterministic replay" : string.Empty)}");
 if (options.Benchmark) Console.WriteLine("The reference VM defines semantics; the SIMD backend must produce the same state hash.");
 return 0;
-
-static CascadeModule BuildLifeRuleModule() => new(
-[
-    // v0 is the current cell state; v1-v8 contain its eight neighbours.
-    new(Opcode.Move, Destination: 9, SourceA: 1),
-    new(Opcode.AddI32, Destination: 9, SourceA: 9, SourceB: 2),
-    new(Opcode.AddI32, Destination: 9, SourceA: 9, SourceB: 3),
-    new(Opcode.AddI32, Destination: 9, SourceA: 9, SourceB: 4),
-    new(Opcode.AddI32, Destination: 9, SourceA: 9, SourceB: 5),
-    new(Opcode.AddI32, Destination: 9, SourceA: 9, SourceB: 6),
-    new(Opcode.AddI32, Destination: 9, SourceA: 9, SourceB: 7),
-    new(Opcode.AddI32, Destination: 9, SourceA: 9, SourceB: 8),
-
-    // A cell is born with exactly three neighbours.
-    new(Opcode.SplatI32, Destination: 10, Immediate: 3),
-    new(Opcode.CompareEqualI32, SourceA: 9, SourceB: 10, Mask: 0),
-    new(Opcode.SplatI32, Destination: 11, Immediate: 1),
-    new(Opcode.Zero, Destination: 12),
-    new(Opcode.SelectI32, Destination: 13, SourceA: 11, SourceB: 12, Mask: 0),
-
-    // A live cell survives with exactly two neighbours.
-    new(Opcode.SplatI32, Destination: 10, Immediate: 2),
-    new(Opcode.CompareEqualI32, SourceA: 9, SourceB: 10, Mask: 1),
-    new(Opcode.SelectI32, Destination: 14, SourceA: 0, SourceB: 12, Mask: 1),
-
-    // Birth and survival are disjoint, so bitwise OR produces the next state.
-    new(Opcode.Or, Destination: 0, SourceA: 13, SourceB: 14),
-    new(Opcode.Halt),
-]);
 
 static bool[] Simulate(CascadeProgram program, bool[] seed, int width, int height, int generations, ExecutionBackend backend)
 {
@@ -248,10 +223,18 @@ static bool[] CreateBenchmarkSeed(int width, int height)
     return cells;
 }
 
-static byte[] Encode(CascadeModule module)
+static CascadeProgram CompileKernel(string sourcePath)
+{
+    var compilation = CascadeCompiler.Compile(File.ReadAllText(sourcePath));
+    if (!compilation.Succeeded)
+        throw new InvalidDataException($"Could not compile {Path.GetFileName(sourcePath)}:{Environment.NewLine}{string.Join(Environment.NewLine, compilation.Diagnostics)}");
+    return CascadeProgram.FromModule(compilation.Module!);
+}
+
+static byte[] Encode(CascadeProgram program)
 {
     using var output = new MemoryStream();
-    CascadeProgram.FromModule(module).Save(output);
+    program.Save(output);
     return output.ToArray();
 }
 
@@ -335,6 +318,7 @@ static void PrintUsage()
     Console.WriteLine("  dotnet run --project examples/Cascade.GameOfLife");
     Console.WriteLine("  dotnet run --project examples/Cascade.GameOfLife -- --benchmark");
     Console.WriteLine("  dotnet run --project examples/Cascade.GameOfLife -- --width 64 --height 32 --generations 100 --no-display");
+    Console.WriteLine("  dotnet run --project examples/Cascade.GameOfLife -- --write-module <file.cvm>");
     Console.WriteLine();
     Console.WriteLine("Options:");
     Console.WriteLine("  --benchmark        Run a deterministic 256x256, 50-generation workload");
@@ -344,6 +328,7 @@ static void PrintUsage()
     Console.WriteLine("  --display          Print initial and final boards");
     Console.WriteLine("  --no-display       Suppress board rendering");
     Console.WriteLine("  --verify-replay    Execute the Cascade workload twice and compare results");
+    Console.WriteLine("  --write-module P   Compile the bundled life-rule.cascade source to P");
     Console.WriteLine("  --help             Show this help");
 }
 

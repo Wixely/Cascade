@@ -23,22 +23,24 @@ useful smoke test.
 
 ## Game of Life bytecode sample
 
-`Cascade.GameOfLife` loads a real portable Cascade module from
-[`life-rule.cvm`](Cascade.GameOfLife/life-rule.cvm). The module contains the
-vectorized Life rule and updates 16 cells at a time. Its readable instruction
-definition and host runner live together in
-[`Program.cs`](Cascade.GameOfLife/Program.cs).
+`Cascade.GameOfLife` compiles the typed kernel source in
+[`life-rule.cascade`](Cascade.GameOfLife/life-rule.cascade) and verifies that it
+exactly reproduces the committed portable
+[`life-rule.cvm`](Cascade.GameOfLife/life-rule.cvm). The kernel contains the
+vectorized Life rule and updates 16 cells at a time. The C# host and benchmark
+live in [`Program.cs`](Cascade.GameOfLife/Program.cs).
 
 ```powershell
 dotnet run --project examples\Cascade.GameOfLife
 ```
 
-The runner checks that the committed bytecode exactly matches the readable
-instruction definition, simulates a glider and an R-pentomino on a wrapping
+The runner checks that the committed bytecode exactly matches the compiled
+source, simulates a glider and an R-pentomino on a wrapping
 32-by-16 board, and verifies an identical replay. Regenerate the bytecode
-deliberately with:
+deliberately with either entry point:
 
 ```powershell
+dotnet run --project src\Cascade.Cli -- compile examples\Cascade.GameOfLife\life-rule.cascade
 dotnet run --project examples\Cascade.GameOfLife -- --write-module examples\Cascade.GameOfLife\life-rule.cvm
 ```
 

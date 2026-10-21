@@ -3,8 +3,10 @@
     <OutputType>Exe</OutputType>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="..\..\src\Cascade.Compiler\Cascade.Compiler.csproj" />
     <ProjectReference Include="..\..\src\Cascade.Core\Cascade.Core.csproj" />
     <ProjectReference Include="..\..\src\Cascade.Runtime\Cascade.Runtime.csproj" />
+    <None Update="life-rule.cascade" CopyToOutputDirectory="PreserveNewest" />
     <None Update="life-rule.cvm" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

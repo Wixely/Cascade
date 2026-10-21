@@ -9,6 +9,7 @@ memory, and a correctness-first reference interpreter.
 - Phase: Complete v0.1 MVP
 - Implementation: C# on .NET 10
 - Backends: Hardware-independent reference interpreter and portable hardware SIMD
+- Source compiler: Typed `.cascade` kernels to portable `CVM1` bytecode
 - Module container: Sectioned `CVM1` version `1.0`
 - Verified platforms: Windows x64 and Linux x64, managed self-contained and NativeAOT
 - License: [MIT](LICENSE)
@@ -27,8 +28,10 @@ comparison, and selection instructions using the native width exposed by .NET.
 
 ```powershell
 dotnet build Cascade.sln
+dotnet run --project tests\Cascade.Compiler.Tests
 dotnet run --project tests\Cascade.Runtime.Conformance
 dotnet run --project src\Cascade.Cli -- sample sample.cvm
+dotnet run --project src\Cascade.Cli -- compile examples\Cascade.GameOfLife\life-rule.cascade
 dotnet run --project src\Cascade.Cli -- run sample.cvm
 dotnet run --project src\Cascade.Cli -- run sample.cvm --backend auto
 dotnet run --project examples\Cascade.Demos
@@ -62,6 +65,7 @@ eng\verify-linux.ps1 -RequireNativeAot
 - [MVP behavior and limitations](docs/mvp.md)
 - [Runnable demos](examples/README.md)
 - [Embedding API](docs/embedding.md)
+- [Kernel language and compiler](docs/language.md)
 - [Post-MVP engineering status](docs/post-mvp.md)
 - [Implementation plan](docs/plan.md)
 - [Project preferences](docs/preferences.md)
