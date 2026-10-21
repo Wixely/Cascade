@@ -16,12 +16,15 @@ public sealed class ReferenceInterpreter : IVmInterpreter
     {
     }
 
-    internal ReferenceInterpreter(CascadeModule module, VmOptions? options, IVectorOperations vectorOperations)
+    internal ReferenceInterpreter(CascadeModule module, VmOptions? options, IVectorOperations vectorOperations, bool moduleIsValidated = false)
     {
         ArgumentNullException.ThrowIfNull(module);
-        var errors = ModuleValidator.Validate(module);
-        if (errors.Count != 0)
-            throw new ArgumentException($"Module validation failed: {string.Join("; ", errors.Select(e => $"[{e.InstructionIndex}] {e.Message}"))}", nameof(module));
+        if (!moduleIsValidated)
+        {
+            var errors = ModuleValidator.Validate(module);
+            if (errors.Count != 0)
+                throw new ArgumentException($"Module validation failed: {string.Join("; ", errors.Select(e => $"[{e.InstructionIndex}] {e.Message}"))}", nameof(module));
+        }
 
         _options = options ?? new VmOptions();
         _options.Validate();
@@ -40,6 +43,12 @@ public sealed class ReferenceInterpreter : IVmInterpreter
     }
 
     public VmState State { get; }
+
+    public void Restart()
+    {
+        _returnAddresses.Clear();
+        State.Restart(_module.EntryPoint);
+    }
 
     public ExecutionResult Execute()
     {

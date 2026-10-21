@@ -48,8 +48,11 @@ program.Save(encoded);
 encoded.Position = 0;
 var instance = CascadeProgram.Load(encoded).Instantiate(backend: ExecutionBackend.Automatic);
 var result = instance.Execute();
+instance.State.Register(0).WriteUInt64(0, 0);
+instance.Restart();
+var restartedResult = instance.Execute();
 var expectedBackend = SimdInterpreter.IsSupported ? ExecutionBackend.HardwareSimd : ExecutionBackend.Reference;
-return result.Succeeded && instance.Backend == expectedBackend && instance.State.Register(0).ReadUInt64(0) == 42 ? 0 : 1;
+return result.Succeeded && restartedResult.Succeeded && instance.Backend == expectedBackend && instance.State.Register(0).ReadUInt64(0) == 42 ? 0 : 1;
 '@ | Set-Content -LiteralPath (Join-Path $consumerRoot 'Program.cs') -Encoding UTF8
 
     & dotnet restore (Join-Path $consumerRoot 'PackageSmoke.csproj') --source $feedRoot --packages $packagesRoot --no-cache --ignore-failed-sources

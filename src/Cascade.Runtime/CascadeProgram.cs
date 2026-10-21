@@ -34,8 +34,8 @@ public sealed class CascadeProgram
             : backend;
         return selected switch
         {
-            ExecutionBackend.Reference => new(new ReferenceInterpreter(_module, options), selected),
-            ExecutionBackend.HardwareSimd => new(new SimdInterpreter(_module, options), selected),
+            ExecutionBackend.Reference => new(new ReferenceInterpreter(_module, options, ScalarVectorOperations.Instance, moduleIsValidated: true), selected),
+            ExecutionBackend.HardwareSimd => new(new SimdInterpreter(_module, options, moduleIsValidated: true), selected),
             _ => throw new ArgumentOutOfRangeException(nameof(backend)),
         };
     }
@@ -55,4 +55,7 @@ public sealed class CascadeInstance
     public ExecutionBackend Backend { get; }
     public VmState State => _interpreter.State;
     public ExecutionResult Execute() => _interpreter.Execute();
+
+    /// <summary>Restarts execution with fresh control state while preserving registers and linear memory.</summary>
+    public void Restart() => _interpreter.Restart();
 }

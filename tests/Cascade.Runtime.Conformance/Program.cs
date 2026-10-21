@@ -27,6 +27,7 @@ var tests = new (string Name, Action Body)[]
     ("constants and entry points execute", ConstantsAndEntryPoint),
     ("embedding facade loads, saves, and isolates instances", EmbeddingFacade),
     ("embedding facade selects execution backends", BackendSelection),
+    ("instances restart with reusable data state", InstanceRestart),
     ("host imports bind and precharge fuel", HostImports),
     ("host import failures are bounded and redacted", HostImportFailures),
     ("deterministic replay", Replay),
@@ -413,6 +414,41 @@ static void BackendSelection()
     else
     {
         Throws<PlatformNotSupportedException>(() => program.Instantiate(backend: ExecutionBackend.HardwareSimd));
+    }
+}
+
+static void InstanceRestart()
+{
+    var program = CascadeProgram.FromModule(new CascadeModule([
+        new(Opcode.CompareEqualI32, SourceA: 0, SourceB: 1, Mask: 0),
+        new(Opcode.AddI32, Destination: 0, SourceA: 0, SourceB: 1),
+        new(Opcode.Halt),
+    ]));
+    var backends = SimdInterpreter.IsSupported
+        ? new[] { ExecutionBackend.Reference, ExecutionBackend.HardwareSimd }
+        : new[] { ExecutionBackend.Reference };
+
+    foreach (var backend in backends)
+    {
+        var instance = program.Instantiate(new VmOptions { Fuel = 10 }, backend);
+        instance.State.Register(0).WriteUInt32(0, 20);
+        instance.State.Register(1).WriteUInt32(0, 22);
+        Success(instance.Execute());
+        Equal(42U, instance.State.Register(0).ReadUInt32(0));
+        Equal((byte)16, instance.State.Mask(0).Width);
+
+        instance.State.Register(2).WriteUInt32(0, 99);
+        instance.Restart();
+        Equal(42U, instance.State.Register(0).ReadUInt32(0));
+        Equal(99U, instance.State.Register(2).ReadUInt32(0));
+        Equal(new PredicateMask(0, 64), instance.State.Mask(0));
+        Equal(10UL, instance.State.FuelRemaining);
+        Equal(0, instance.State.InstructionPointer);
+
+        instance.State.Register(0).WriteUInt32(0, 10);
+        instance.State.Register(1).WriteUInt32(0, 5);
+        Success(instance.Execute());
+        Equal(15U, instance.State.Register(0).ReadUInt32(0));
     }
 }
 

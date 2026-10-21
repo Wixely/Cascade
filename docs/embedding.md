@@ -23,6 +23,28 @@ if (!result.Succeeded)
 returns. `Instantiate` creates fresh registers, predicates, memory, fuel, and
 call-stack state. Complete final state is available through `CascadeInstance.State`.
 
+For repeated kernel invocation, reuse an instance instead of allocating one per
+batch:
+
+```csharp
+var instance = program.Instantiate(backend: ExecutionBackend.Automatic);
+
+for (var batch = 0; batch < batchCount; batch++)
+{
+    if (batch != 0)
+        instance.Restart();
+
+    // Overwrite this invocation's input registers, then execute.
+    var result = instance.Execute();
+}
+```
+
+`Restart` resets the instruction pointer, fuel, predicate masks, and VM call
+stack. It deliberately preserves vector registers and linear memory so a host
+can retain kernel data or overwrite only its inputs. Import bindings and limits
+also remain attached to the instance. Create a new instance when completely
+zero-initialized data state is required.
+
 ## Execution backends
 
 Reference execution remains the default and defines Cascade semantics. Select

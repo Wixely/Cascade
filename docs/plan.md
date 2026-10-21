@@ -243,7 +243,8 @@ Targets remain unset until the project is scheduled.
 - [x] Add golden `CVM1` fixtures, a stable embedding facade, packages, benchmark corpora, and a differential harness — Owner: Codex — Completed: 2026-10-20
 - [x] Verify NativeAOT publish and execution on Linux — Owner: Codex — Completed: 2026-10-20
 - [x] Implement and differentially verify a portable hardware-SIMD backend — Owner: Codex — Completed: 2026-10-21
-- [ ] Profile dispatch and instance-creation overhead before choosing an AVX2- or AVX-512-specific backend — Owner: TBD — Due: TBD
+- [x] Profile dispatch and instance-creation overhead and add reusable instance execution — Owner: Codex — Completed: 2026-10-21
+- [ ] Design and benchmark batched kernel execution before choosing an AVX2- or AVX-512-specific backend — Owner: TBD — Due: TBD
 
 ## Open questions
 

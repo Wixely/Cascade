@@ -15,6 +15,7 @@ internal interface IVmInterpreter
 {
     VmState State { get; }
     ExecutionResult Execute();
+    void Restart();
 }
 
 /// <summary>Executes Cascade with hardware-accelerated System.Numerics vectors.</summary>
@@ -29,8 +30,16 @@ public sealed class SimdInterpreter : IVmInterpreter
         _interpreter = new(module, options, HardwareSimdVectorOperations.Instance);
     }
 
+    internal SimdInterpreter(CascadeModule module, VmOptions? options, bool moduleIsValidated)
+    {
+        if (!IsSupported)
+            throw new PlatformNotSupportedException("The hardware SIMD backend requires little-endian hardware acceleration through System.Numerics.Vector.");
+        _interpreter = new(module, options, HardwareSimdVectorOperations.Instance, moduleIsValidated);
+    }
+
     public static bool IsSupported => BitConverter.IsLittleEndian && Vector.IsHardwareAccelerated;
     public static int VectorWidthBits => IsSupported ? Vector<byte>.Count * 8 : 0;
     public VmState State => _interpreter.State;
     public ExecutionResult Execute() => _interpreter.Execute();
+    public void Restart() => _interpreter.Restart();
 }

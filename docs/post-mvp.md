@@ -63,9 +63,16 @@ all accelerated opcode families.
 
 On the verified Windows x64 development machine, .NET selected 256-bit hardware
 vectors. The 256-by-256 Game of Life workload produced the same state hash on
-the reference, SIMD, and scalar implementations and measured a SIMD improvement
-over the reference interpreter. Timing is machine-dependent and is not a
-portable performance guarantee.
+the reference, SIMD, and scalar implementations. Reusing one validated VM
+instance per backend reduced per-batch setup overhead; a 2026-10-21 managed run
+measured 307.4 ms for the reference VM, 246.1 ms for SIMD, and 64.5 ms for the
+direct scalar oracle. Timing is machine-dependent and is not a portable
+performance guarantee.
+
+`CascadeInstance.Restart` supports this kernel pattern by resetting control
+state and fuel while preserving registers and linear memory. The instance and
+dispatch overhead is now lower, but the remaining scalar gap shows that
+per-instruction dispatch dominates short, 18-instruction invocations.
 
 ```powershell
 eng\verify-packages.ps1
@@ -76,5 +83,10 @@ dotnet run --project tools\Cascade.Benchmarks -c Release -- --quick
 
 ## Recommended next action
 
-Perform the release privacy review, create the public Wixely GitHub repository,
-and publish the reviewed v0.1 work — Owner: User — Due: TBD.
+Design and measure a batched kernel API that amortizes interpreter dispatch
+across many independent 16-lane batches before considering CPU-specific AVX2 or
+AVX-512 code — Owner: TBD — Due: TBD.
+
+Release remains a separate user-owned action: perform the privacy review, create
+the public Wixely GitHub repository, and publish the reviewed v0.1 work — Owner:
+User — Due: TBD.

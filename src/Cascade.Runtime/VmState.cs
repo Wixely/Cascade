@@ -30,4 +30,11 @@ public sealed class VmState
     public VectorRegister Register(int index) => _registers[index];
     public PredicateMask Mask(int index) => _masks[index];
     internal void SetMask(int index, PredicateMask value) => _masks[index] = value;
+
+    internal void Restart(int entryPoint)
+    {
+        InstructionPointer = entryPoint;
+        FuelRemaining = InitialFuel;
+        Array.Fill(_masks, new PredicateMask(0, 64));
+    }
 }

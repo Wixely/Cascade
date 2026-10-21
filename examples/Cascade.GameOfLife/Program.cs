@@ -147,12 +147,17 @@ static CascadeModule BuildLifeRuleModule() => new(
 static bool[] Simulate(CascadeProgram program, bool[] seed, int width, int height, int generations, ExecutionBackend backend)
 {
     var current = (bool[])seed.Clone();
+    var instance = program.Instantiate(new VmOptions { MemorySize = 0, Fuel = 64 }, backend);
+    var firstBatch = true;
     for (var generation = 0; generation < generations; generation++)
     {
         var next = new bool[current.Length];
         for (var start = 0; start < current.Length; start += 16)
         {
-            var instance = program.Instantiate(new VmOptions { MemorySize = 0, Fuel = 64 }, backend);
+            if (firstBatch)
+                firstBatch = false;
+            else
+                instance.Restart();
             for (var lane = 0; lane < 16; lane++)
             {
                 var index = start + lane;

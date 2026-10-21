@@ -55,4 +55,6 @@ total cell count must be divisible by 16. Add `--verify-replay` to benchmark a
 second identical Cascade execution. The reference interpreter provides the
 semantic baseline. When hardware SIMD is available, the benchmark executes both
 backends, requires identical output, and reports the measured SIMD speedup and
-active hardware-vector width.
+active hardware-vector width. The runner reuses each backend's VM instance and
+calls `Restart` between 16-cell batches, preserving data storage while resetting
+control state and fuel.
