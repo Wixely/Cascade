@@ -2,7 +2,7 @@
 
 - Status: Complete
 - Owner: Codex
-- Last verified: 2026-10-20
+- Last verified: 2026-10-21
 
 ## Linux verification
 
@@ -51,6 +51,21 @@ proves that the harness reports divergence.
 call-heavy corpora. It uses only `Stopwatch`, supports a quick smoke mode, and
 reports executed instructions and throughput without making machine-independent
 performance assertions.
+
+## Hardware SIMD backend
+
+`SimdInterpreter` accelerates vector splats, arithmetic, bitwise operations,
+signed comparisons, and masked selection through `System.Numerics.Vector` while
+sharing the reference interpreter's validation, control, memory, fuel, import,
+and trap paths. The embedding API supports explicit reference, explicit SIMD,
+and automatic selection. The differential harness compares complete state after
+all accelerated opcode families.
+
+On the verified Windows x64 development machine, .NET selected 256-bit hardware
+vectors. The 256-by-256 Game of Life workload produced the same state hash on
+the reference, SIMD, and scalar implementations and measured a SIMD improvement
+over the reference interpreter. Timing is machine-dependent and is not a
+portable performance guarantee.
 
 ```powershell
 eng\verify-packages.ps1

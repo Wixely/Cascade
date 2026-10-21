@@ -3,7 +3,7 @@
 - Status: Complete
 - Owner: Codex
 - Implemented: 2026-10-20
-- Last verified: 2026-10-20
+- Last verified: 2026-10-21
 
 ## Included
 
@@ -59,7 +59,9 @@ in [the CVM1 decision](decisions/2026-10-20-cvm1-module-format.md).
 `cascade sample <path>` writes a minimal module that computes `40 + 2` in all
 eight i64 lanes of `v0`. `cascade run <path>` validates and executes a module,
 prints `v0.i64` on success, or prints a typed trap and returns exit code `2`.
-Load and validation errors return exit code `1`.
+Load and validation errors return exit code `1`. Add `--backend reference`,
+`--backend simd`, or `--backend auto` after the path to select an execution
+backend; reference remains the default.
 
 ## Not yet included
 

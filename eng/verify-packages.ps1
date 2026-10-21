@@ -7,6 +7,7 @@ $artifactsRoot = [System.IO.Path]::GetFullPath((Join-Path $repositoryRoot 'artif
 $testRoot = [System.IO.Path]::GetFullPath((Join-Path $artifactsRoot ('package-smoke-' + [Guid]::NewGuid().ToString('N'))))
 $feedRoot = Join-Path $testRoot 'feed'
 $consumerRoot = Join-Path $testRoot 'consumer'
+$packagesRoot = Join-Path $testRoot 'packages'
 
 if (-not $testRoot.StartsWith($artifactsRoot + [System.IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
     throw 'Temporary package test path escaped the artifacts directory.'
@@ -45,12 +46,13 @@ var program = CascadeProgram.FromModule(module);
 using var encoded = new MemoryStream();
 program.Save(encoded);
 encoded.Position = 0;
-var instance = CascadeProgram.Load(encoded).Instantiate();
+var instance = CascadeProgram.Load(encoded).Instantiate(backend: ExecutionBackend.Automatic);
 var result = instance.Execute();
-return result.Succeeded && instance.State.Register(0).ReadUInt64(0) == 42 ? 0 : 1;
+var expectedBackend = SimdInterpreter.IsSupported ? ExecutionBackend.HardwareSimd : ExecutionBackend.Reference;
+return result.Succeeded && instance.Backend == expectedBackend && instance.State.Register(0).ReadUInt64(0) == 42 ? 0 : 1;
 '@ | Set-Content -LiteralPath (Join-Path $consumerRoot 'Program.cs') -Encoding UTF8
 
-    & dotnet restore (Join-Path $consumerRoot 'PackageSmoke.csproj') --source $feedRoot --ignore-failed-sources
+    & dotnet restore (Join-Path $consumerRoot 'PackageSmoke.csproj') --source $feedRoot --packages $packagesRoot --no-cache --ignore-failed-sources
     if ($LASTEXITCODE -ne 0) { throw 'Package consumer restore failed.' }
     & dotnet run --project (Join-Path $consumerRoot 'PackageSmoke.csproj') -c Release --no-restore
     if ($LASTEXITCODE -ne 0) { throw 'Package consumer execution failed.' }

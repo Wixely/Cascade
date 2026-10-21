@@ -2,15 +2,21 @@ using Cascade.Core;
 
 namespace Cascade.Runtime;
 
-public sealed class ReferenceInterpreter
+public sealed class ReferenceInterpreter : IVmInterpreter
 {
     private readonly CascadeModule _module;
     private readonly VmOptions _options;
     private readonly Stack<int> _returnAddresses = new();
     private readonly HostImportHandler?[] _importBindings;
     private readonly VmTrap? _bindingTrap;
+    private readonly IVectorOperations _vectorOperations;
 
-    public ReferenceInterpreter(CascadeModule module, VmOptions? options = null)
+    public ReferenceInterpreter(CascadeModule module, VmOptions? options = null) :
+        this(module, options, ScalarVectorOperations.Instance)
+    {
+    }
+
+    internal ReferenceInterpreter(CascadeModule module, VmOptions? options, IVectorOperations vectorOperations)
     {
         ArgumentNullException.ThrowIfNull(module);
         var errors = ModuleValidator.Validate(module);
@@ -19,6 +25,7 @@ public sealed class ReferenceInterpreter
 
         _options = options ?? new VmOptions();
         _options.Validate();
+        _vectorOperations = vectorOperations;
         _module = module;
         State = new VmState(_options.MemorySize, _options.Fuel);
         State.InstructionPointer = module.EntryPoint;
@@ -55,19 +62,19 @@ public sealed class ReferenceInterpreter
                 Opcode.SplatI32 => SplatI32(instruction),
                 Opcode.SplatI64 => SplatI64(instruction),
                 Opcode.LoadConstant => LoadConstant(instruction),
-                Opcode.AddI32 => BinaryI32(instruction, static (a, b) => unchecked(a + b)),
-                Opcode.SubI32 => BinaryI32(instruction, static (a, b) => unchecked(a - b)),
-                Opcode.MulI32 => BinaryI32(instruction, static (a, b) => unchecked(a * b)),
-                Opcode.AddI64 => BinaryI64(instruction, static (a, b) => unchecked(a + b)),
-                Opcode.SubI64 => BinaryI64(instruction, static (a, b) => unchecked(a - b)),
-                Opcode.And => Bitwise(instruction, static (a, b) => (byte)(a & b)),
-                Opcode.Or => Bitwise(instruction, static (a, b) => (byte)(a | b)),
-                Opcode.Xor => Bitwise(instruction, static (a, b) => (byte)(a ^ b)),
+                Opcode.AddI32 => BinaryI32(instruction),
+                Opcode.SubI32 => BinaryI32(instruction),
+                Opcode.MulI32 => BinaryI32(instruction),
+                Opcode.AddI64 => BinaryI64(instruction),
+                Opcode.SubI64 => BinaryI64(instruction),
+                Opcode.And => Bitwise(instruction),
+                Opcode.Or => Bitwise(instruction),
+                Opcode.Xor => Bitwise(instruction),
                 Opcode.Not => Not(instruction),
-                Opcode.CompareEqualI32 => CompareI32(instruction, static (a, b) => a == b),
-                Opcode.CompareLessThanI32 => CompareI32(instruction, static (a, b) => a < b),
-                Opcode.CompareEqualI64 => CompareI64(instruction, static (a, b) => a == b),
-                Opcode.CompareLessThanI64 => CompareI64(instruction, static (a, b) => a < b),
+                Opcode.CompareEqualI32 => CompareI32(instruction),
+                Opcode.CompareLessThanI32 => CompareI32(instruction),
+                Opcode.CompareEqualI64 => CompareI64(instruction),
+                Opcode.CompareLessThanI64 => CompareI64(instruction),
                 Opcode.ConvertMask8 => ConvertMask(instruction, 8),
                 Opcode.ConvertMask16 => ConvertMask(instruction, 16),
                 Opcode.ConvertMask32 => ConvertMask(instruction, 32),
@@ -102,19 +109,9 @@ public sealed class ReferenceInterpreter
     private VmTrap? Zero(Instruction i) { State.Register(i.Destination).Clear(); return null; }
     private VmTrap? Move(Instruction i) { State.Register(i.Destination).CopyFrom(State.Register(i.SourceA)); return null; }
 
-    private VmTrap? SplatI32(Instruction i)
-    {
-        var destination = State.Register(i.Destination);
-        for (var lane = 0; lane < 16; lane++) destination.WriteUInt32(lane, unchecked((uint)i.Immediate));
-        return null;
-    }
+    private VmTrap? SplatI32(Instruction i) { _vectorOperations.SplatI32(State.Register(i.Destination), unchecked((uint)i.Immediate)); return null; }
 
-    private VmTrap? SplatI64(Instruction i)
-    {
-        var destination = State.Register(i.Destination);
-        for (var lane = 0; lane < 8; lane++) destination.WriteUInt64(lane, i.Immediate);
-        return null;
-    }
+    private VmTrap? SplatI64(Instruction i) { _vectorOperations.SplatI64(State.Register(i.Destination), i.Immediate); return null; }
 
     private VmTrap? LoadConstant(Instruction i)
     {
@@ -122,63 +119,40 @@ public sealed class ReferenceInterpreter
         return null;
     }
 
-    private VmTrap? BinaryI32(Instruction i, Func<uint, uint, uint> operation)
+    private VmTrap? BinaryI32(Instruction i)
     {
-        var destination = State.Register(i.Destination);
-        var a = State.Register(i.SourceA);
-        var b = State.Register(i.SourceB);
-        Span<uint> values = stackalloc uint[16];
-        for (var lane = 0; lane < values.Length; lane++) values[lane] = operation(a.ReadUInt32(lane), b.ReadUInt32(lane));
-        for (var lane = 0; lane < values.Length; lane++) destination.WriteUInt32(lane, values[lane]);
+        _vectorOperations.BinaryI32(i.Opcode, State.Register(i.Destination), State.Register(i.SourceA), State.Register(i.SourceB));
         return null;
     }
 
-    private VmTrap? BinaryI64(Instruction i, Func<ulong, ulong, ulong> operation)
+    private VmTrap? BinaryI64(Instruction i)
     {
-        var destination = State.Register(i.Destination);
-        var a = State.Register(i.SourceA);
-        var b = State.Register(i.SourceB);
-        Span<ulong> values = stackalloc ulong[8];
-        for (var lane = 0; lane < values.Length; lane++) values[lane] = operation(a.ReadUInt64(lane), b.ReadUInt64(lane));
-        for (var lane = 0; lane < values.Length; lane++) destination.WriteUInt64(lane, values[lane]);
+        _vectorOperations.BinaryI64(i.Opcode, State.Register(i.Destination), State.Register(i.SourceA), State.Register(i.SourceB));
         return null;
     }
 
-    private VmTrap? Bitwise(Instruction i, Func<byte, byte, byte> operation)
+    private VmTrap? Bitwise(Instruction i)
     {
-        var destination = State.Register(i.Destination);
-        var a = State.Register(i.SourceA);
-        var b = State.Register(i.SourceB);
-        Span<byte> values = stackalloc byte[VectorRegister.ByteCount];
-        for (var index = 0; index < values.Length; index++) values[index] = operation(a.ReadByte(index), b.ReadByte(index));
-        destination.ReadFrom(values);
+        _vectorOperations.Bitwise(i.Opcode, State.Register(i.Destination), State.Register(i.SourceA), State.Register(i.SourceB));
         return null;
     }
 
     private VmTrap? Not(Instruction i)
     {
-        var destination = State.Register(i.Destination);
-        var source = State.Register(i.SourceA);
-        Span<byte> values = stackalloc byte[VectorRegister.ByteCount];
-        for (var index = 0; index < values.Length; index++) values[index] = (byte)~source.ReadByte(index);
-        destination.ReadFrom(values);
+        _vectorOperations.Not(State.Register(i.Destination), State.Register(i.SourceA));
         return null;
     }
 
-    private VmTrap? CompareI32(Instruction i, Func<int, int, bool> comparison)
+    private VmTrap? CompareI32(Instruction i)
     {
-        ulong bits = 0;
-        for (var lane = 0; lane < 16; lane++)
-            if (comparison(State.Register(i.SourceA).ReadInt32(lane), State.Register(i.SourceB).ReadInt32(lane))) bits |= 1UL << lane;
+        var bits = _vectorOperations.CompareI32(i.Opcode, State.Register(i.SourceA), State.Register(i.SourceB));
         State.SetMask(i.Mask, new(bits, 16));
         return null;
     }
 
-    private VmTrap? CompareI64(Instruction i, Func<long, long, bool> comparison)
+    private VmTrap? CompareI64(Instruction i)
     {
-        ulong bits = 0;
-        for (var lane = 0; lane < 8; lane++)
-            if (comparison(State.Register(i.SourceA).ReadInt64(lane), State.Register(i.SourceB).ReadInt64(lane))) bits |= 1UL << lane;
+        var bits = _vectorOperations.CompareI64(i.Opcode, State.Register(i.SourceA), State.Register(i.SourceB));
         State.SetMask(i.Mask, new(bits, 8));
         return null;
     }
@@ -195,16 +169,10 @@ public sealed class ReferenceInterpreter
     {
         var mask = State.Mask(i.Mask);
         if (mask.Width != lanes) return InvalidMaskWidth(lanes, mask.Width);
-        var destination = State.Register(i.Destination);
-        var a = State.Register(i.SourceA);
-        var b = State.Register(i.SourceB);
-        Span<byte> values = stackalloc byte[VectorRegister.ByteCount];
-        for (var lane = 0; lane < lanes; lane++)
-        {
-            var source = (mask.ActiveBits & (1UL << lane)) != 0 ? a : b;
-            for (var offset = 0; offset < laneBytes; offset++) values[(lane * laneBytes) + offset] = source.ReadByte((lane * laneBytes) + offset);
-        }
-        destination.ReadFrom(values);
+        if (laneBytes == 4)
+            _vectorOperations.SelectI32(State.Register(i.Destination), State.Register(i.SourceA), State.Register(i.SourceB), mask.ActiveBits);
+        else
+            _vectorOperations.SelectI64(State.Register(i.Destination), State.Register(i.SourceA), State.Register(i.SourceB), mask.ActiveBits);
         return null;
     }
 

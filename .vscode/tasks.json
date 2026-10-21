@@ -35,6 +35,21 @@
       "group": "test"
     },
     {
+      "label": "Game of Life demo",
+      "type": "process",
+      "command": "dotnet",
+      "args": ["run", "--project", "${workspaceFolder}/examples/Cascade.GameOfLife"],
+      "problemMatcher": "$msCompile",
+      "group": "test"
+    },
+    {
+      "label": "Game of Life benchmark",
+      "type": "process",
+      "command": "dotnet",
+      "args": ["run", "--project", "${workspaceFolder}/examples/Cascade.GameOfLife", "-c", "Release", "--", "--benchmark"],
+      "problemMatcher": "$msCompile"
+    },
+    {
       "label": "differential",
       "type": "process",
       "command": "dotnet",

@@ -8,16 +8,20 @@ memory, and a correctness-first reference interpreter.
 
 - Phase: Complete v0.1 MVP
 - Implementation: C# on .NET 10
-- Backend: Hardware-independent reference interpreter
+- Backends: Hardware-independent reference interpreter and portable hardware SIMD
 - Module container: Sectioned `CVM1` version `1.0`
 - Verified platforms: Windows x64 and Linux x64, managed self-contained and NativeAOT
 - License: [MIT](LICENSE)
-- Last reviewed: 2026-10-20
+- Last reviewed: 2026-10-21
 
 The MVP implements data, arithmetic, bitwise, comparison, mask conversion,
 selection, memory, branch, call, return, constant, host-call, and halt instructions. Execution is
 bounded by fuel and call depth; invalid memory operations produce typed traps;
 gather/scatter addresses are checked before effects occur.
+
+The reference backend defines behavior. On supported little-endian platforms,
+the optional hardware-SIMD backend accelerates vector arithmetic, bitwise,
+comparison, and selection instructions using the native width exposed by .NET.
 
 ## Build and run
 
@@ -26,7 +30,9 @@ dotnet build Cascade.sln
 dotnet run --project tests\Cascade.Runtime.Conformance
 dotnet run --project src\Cascade.Cli -- sample sample.cvm
 dotnet run --project src\Cascade.Cli -- run sample.cvm
+dotnet run --project src\Cascade.Cli -- run sample.cvm --backend auto
 dotnet run --project examples\Cascade.Demos
+dotnet run --project examples\Cascade.GameOfLife
 ```
 
 The sample halts with every `v0.i64` lane set to `42`. The repository-local VS

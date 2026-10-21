@@ -19,3 +19,4 @@ The initial decision queue is listed under [Open questions](../plan.md#open-ques
 - [Publish Cascade on GitHub under Wixely](2026-10-20-public-github-under-wixely.md)
 - [Freeze Cascade v0.1 executable semantics](2026-10-20-executable-semantics.md)
 - [Freeze the CVM1 module format](2026-10-20-cvm1-module-format.md)
+- [Add a portable hardware-SIMD execution backend](2026-10-21-portable-hardware-simd-backend.md)

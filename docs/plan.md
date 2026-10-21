@@ -3,7 +3,7 @@
 - Status: v0.1 MVP complete
 - Owner: TBD
 - Created: 2026-10-20
-- Last reviewed: 2026-10-20
+- Last reviewed: 2026-10-21
 - Target date: None
 - Intended repository: Public GitHub repository under Wixely; remote not yet created
 - License: MIT
@@ -41,7 +41,7 @@ The first useful result is a tested C#/.NET 10 runtime that executes decoded in-
 | Branches | Direct instruction indices, including mask-based conditions |
 | Functions | VM-managed `call` and `ret` stack |
 | External operations | Explicit host imports |
-| Backends | Reference interpreter first, AVX-512 later |
+| Backends | Reference interpreter as authority; portable hardware SIMD available post-MVP |
 | Module format | Versioned `.cvm` binary |
 | Implementation | C# on .NET 10 |
 
@@ -218,6 +218,7 @@ Targets remain unset until the project is scheduled.
 | 4. Portable modules | Completed 2026-10-20 | `.cvm` round-trips valid fixtures and rejects malformed/adversarial fixtures |
 | 5. Usable v0.1 | Completed 2026-10-20 | CLI, examples, diagnostics, Windows verification, and publish checks pass |
 | 6. Optimization readiness | Completed 2026-10-20 | Benchmark corpus and differential harness are ready for optimized-backend work |
+| 7. Portable hardware SIMD | Completed 2026-10-21 | Accelerated vector operations match complete reference state under differential tests |
 
 ## Verification strategy
 
@@ -241,6 +242,8 @@ Targets remain unset until the project is scheduled.
 - [x] Implement architectural types and the decoded interpreter before `.cvm` serialization — Owner: Codex — Completed: 2026-10-20
 - [x] Add golden `CVM1` fixtures, a stable embedding facade, packages, benchmark corpora, and a differential harness — Owner: Codex — Completed: 2026-10-20
 - [x] Verify NativeAOT publish and execution on Linux — Owner: Codex — Completed: 2026-10-20
+- [x] Implement and differentially verify a portable hardware-SIMD backend — Owner: Codex — Completed: 2026-10-21
+- [ ] Profile dispatch and instance-creation overhead before choosing an AVX2- or AVX-512-specific backend — Owner: TBD — Due: TBD
 
 ## Open questions
 

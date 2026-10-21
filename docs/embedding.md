@@ -23,6 +23,25 @@ if (!result.Succeeded)
 returns. `Instantiate` creates fresh registers, predicates, memory, fuel, and
 call-stack state. Complete final state is available through `CascadeInstance.State`.
 
+## Execution backends
+
+Reference execution remains the default and defines Cascade semantics. Select
+portable hardware SIMD explicitly, or request automatic selection:
+
+```csharp
+var simd = program.Instantiate(backend: ExecutionBackend.HardwareSimd);
+var automatic = program.Instantiate(backend: ExecutionBackend.Automatic);
+
+Console.WriteLine($"Selected backend: {automatic.Backend}");
+Console.WriteLine($"SIMD available: {SimdInterpreter.IsSupported}");
+Console.WriteLine($"Native vector width: {SimdInterpreter.VectorWidthBits} bits");
+```
+
+`HardwareSimd` throws `PlatformNotSupportedException` when accelerated
+`System.Numerics.Vector` operations or little-endian storage are unavailable.
+`Automatic` falls back to the reference backend. Both paths share validation,
+fuel, traps, memory, control flow, and host-import handling.
+
 ## Host imports
 
 Bind only capabilities the host intends to grant:
@@ -49,7 +68,8 @@ callee-saved registers. Host exceptions become redacted `HostCallFailed` traps.
 ## Compatibility
 
 The stable v0.1 embedding entry points are `CascadeProgram`, `CascadeInstance`,
-`VmOptions`, `ImportKey`, `HostImportHandler`, `HostCallContext`,
+`VmOptions`, `ExecutionBackend`, `SimdInterpreter`, `ImportKey`,
+`HostImportHandler`, `HostCallContext`,
 `HostCallStatus`, `ExecutionResult`, `VmTrap`, `TrapCode`, and read access to
 `VmState`. Breaking these contracts requires a documented package-version
 change. Low-level interpreter and decoded-module types remain available for

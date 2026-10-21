@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using Cascade.Core;
 using Cascade.Runtime;
 
@@ -25,10 +26,16 @@ var corpus = new (string Name, CascadeModule Module, VmOptions Options)[]
         new(Opcode.Halt),
     ], functions: [new(3, 5)]), new()),
     ("fuel trap", new([new(Opcode.Jump, Immediate: 0)]), new() { Fuel = 17 }),
+    ("vector operations", VectorOperations(), new()),
 };
 
 IDifferentialBackend baseline = new ReferenceBackend("reference-a");
-IDifferentialBackend candidate = new ReferenceBackend("reference-b");
+IDifferentialBackend candidate = SimdInterpreter.IsSupported
+    ? new SimdBackend()
+    : new ReferenceBackend("reference-b");
+Console.WriteLine(SimdInterpreter.IsSupported
+    ? $"Hardware SIMD differential candidate: {SimdInterpreter.VectorWidthBits}-bit System.Numerics vectors"
+    : "Hardware SIMD is unavailable; differential candidate uses a second reference interpreter.");
 foreach (var item in corpus)
 {
     var difference = DifferentialVerifier.Compare(item.Module, item.Options, baseline, candidate);
@@ -49,6 +56,45 @@ if (selfTest is null)
 Console.WriteLine("PASS harness self-test");
 Console.WriteLine($"{corpus.Length} corpus cases matched; divergence detector passed");
 return 0;
+
+static CascadeModule VectorOperations()
+{
+    int[] left = [int.MinValue, -100, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, int.MaxValue, 42];
+    int[] right = [int.MinValue, -50, 1, 0, -1, 3, 2, 4, 6, 5, 8, 7, 10, 9, 1, 42];
+    return new(
+    [
+        new(Opcode.LoadConstant, Destination: 0, Immediate: 0),
+        new(Opcode.LoadConstant, Destination: 1, Immediate: 1),
+        new(Opcode.AddI32, Destination: 2, SourceA: 0, SourceB: 1),
+        new(Opcode.SubI32, Destination: 3, SourceA: 0, SourceB: 1),
+        new(Opcode.MulI32, Destination: 4, SourceA: 0, SourceB: 1),
+        new(Opcode.AddI64, Destination: 5, SourceA: 0, SourceB: 1),
+        new(Opcode.SubI64, Destination: 6, SourceA: 0, SourceB: 1),
+        new(Opcode.And, Destination: 7, SourceA: 0, SourceB: 1),
+        new(Opcode.Or, Destination: 8, SourceA: 0, SourceB: 1),
+        new(Opcode.Xor, Destination: 9, SourceA: 0, SourceB: 1),
+        new(Opcode.Not, Destination: 10, SourceA: 0),
+        new(Opcode.CompareEqualI32, SourceA: 0, SourceB: 1, Mask: 0),
+        new(Opcode.SelectI32, Destination: 11, SourceA: 0, SourceB: 1, Mask: 0),
+        new(Opcode.CompareLessThanI32, SourceA: 0, SourceB: 1, Mask: 1),
+        new(Opcode.SelectI32, Destination: 12, SourceA: 1, SourceB: 0, Mask: 1),
+        new(Opcode.CompareEqualI64, SourceA: 0, SourceB: 1, Mask: 2),
+        new(Opcode.SelectI64, Destination: 13, SourceA: 0, SourceB: 1, Mask: 2),
+        new(Opcode.CompareLessThanI64, SourceA: 0, SourceB: 1, Mask: 3),
+        new(Opcode.SelectI64, Destination: 14, SourceA: 1, SourceB: 0, Mask: 3),
+        new(Opcode.AddI32, Destination: 0, SourceA: 0, SourceB: 1),
+        new(Opcode.Halt),
+    ],
+    [I32Constant(left), I32Constant(right)]);
+}
+
+static VectorConstant I32Constant(IReadOnlyList<int> values)
+{
+    var bytes = new byte[VectorRegister.ByteCount];
+    for (var lane = 0; lane < values.Count; lane++)
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(lane * sizeof(int), sizeof(int)), values[lane]);
+    return new(bytes);
+}
 
 public interface IDifferentialBackend
 {
@@ -82,6 +128,18 @@ public sealed class ReferenceBackend(string name) : IDifferentialBackend
         state.LinearMemory.ToArray(),
         state.InstructionPointer,
         state.FuelRemaining);
+}
+
+public sealed class SimdBackend : IDifferentialBackend
+{
+    public string Name => "hardware-simd";
+
+    public BackendRun Execute(CascadeModule module, VmOptions options)
+    {
+        var interpreter = new SimdInterpreter(module, options);
+        var result = interpreter.Execute();
+        return new(result, ReferenceBackend.Snapshot(interpreter.State));
+    }
 }
 
 public sealed class DivergentBackend : IDifferentialBackend

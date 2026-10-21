@@ -26,6 +26,7 @@ var tests = new (string Name, Action Body)[]
     ("golden CVM1 fixtures remain byte-stable", GoldenFixtures),
     ("constants and entry points execute", ConstantsAndEntryPoint),
     ("embedding facade loads, saves, and isolates instances", EmbeddingFacade),
+    ("embedding facade selects execution backends", BackendSelection),
     ("host imports bind and precharge fuel", HostImports),
     ("host import failures are bounded and redacted", HostImportFailures),
     ("deterministic replay", Replay),
@@ -386,6 +387,33 @@ static void EmbeddingFacade()
     Success(second.Execute());
     first.State.Register(0).WriteUInt64(0, 99);
     Equal(42UL, second.State.Register(0).ReadUInt64(0));
+}
+
+static void BackendSelection()
+{
+    var program = CascadeProgram.FromModule(new CascadeModule([
+        new(Opcode.SplatI32, Destination: 0, Immediate: 21),
+        new(Opcode.AddI32, Destination: 0, SourceA: 0, SourceB: 0),
+        new(Opcode.Halt),
+    ]));
+    var reference = program.Instantiate(backend: ExecutionBackend.Reference);
+    var automatic = program.Instantiate(backend: ExecutionBackend.Automatic);
+    Success(reference.Execute());
+    Success(automatic.Execute());
+    Equal(ExecutionBackend.Reference, reference.Backend);
+    Equal(SimdInterpreter.IsSupported ? ExecutionBackend.HardwareSimd : ExecutionBackend.Reference, automatic.Backend);
+    True(reference.State.Register(0).Bytes.SequenceEqual(automatic.State.Register(0).Bytes), "Automatic backend differs from reference output.");
+
+    if (SimdInterpreter.IsSupported)
+    {
+        var simd = program.Instantiate(backend: ExecutionBackend.HardwareSimd);
+        Success(simd.Execute());
+        Equal(42U, simd.State.Register(0).ReadUInt32(15));
+    }
+    else
+    {
+        Throws<PlatformNotSupportedException>(() => program.Instantiate(backend: ExecutionBackend.HardwareSimd));
+    }
 }
 
 static void HostImports()

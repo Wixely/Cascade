@@ -27,16 +27,32 @@ public sealed class CascadeProgram
 
     public void Save(Stream stream) => CvmModuleFormat.Write(stream, _module);
 
-    public CascadeInstance Instantiate(VmOptions? options = null) => new(new ReferenceInterpreter(_module, options));
+    public CascadeInstance Instantiate(VmOptions? options = null, ExecutionBackend backend = ExecutionBackend.Reference)
+    {
+        var selected = backend == ExecutionBackend.Automatic
+            ? SimdInterpreter.IsSupported ? ExecutionBackend.HardwareSimd : ExecutionBackend.Reference
+            : backend;
+        return selected switch
+        {
+            ExecutionBackend.Reference => new(new ReferenceInterpreter(_module, options), selected),
+            ExecutionBackend.HardwareSimd => new(new SimdInterpreter(_module, options), selected),
+            _ => throw new ArgumentOutOfRangeException(nameof(backend)),
+        };
+    }
 }
 
 /// <summary>An isolated Cascade VM instance. Instances are not thread-safe.</summary>
 public sealed class CascadeInstance
 {
-    private readonly ReferenceInterpreter _interpreter;
+    private readonly IVmInterpreter _interpreter;
 
-    internal CascadeInstance(ReferenceInterpreter interpreter) => _interpreter = interpreter;
+    internal CascadeInstance(IVmInterpreter interpreter, ExecutionBackend backend)
+    {
+        _interpreter = interpreter;
+        Backend = backend;
+    }
 
+    public ExecutionBackend Backend { get; }
     public VmState State => _interpreter.State;
     public ExecutionResult Execute() => _interpreter.Execute();
 }

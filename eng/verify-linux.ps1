@@ -53,4 +53,7 @@ $linuxRepositoryRoot = (& wsl.exe @wslDistributionArgs -- wslpath -a $repository
 $linuxNativeOutput = $linuxPublishRoot + '/native-aot'
 Invoke-Checked { wsl.exe @wslDistributionArgs -- dotnet publish ($linuxRepositoryRoot + '/src/Cascade.Cli/Cascade.Cli.csproj') -c Release -r linux-x64 --self-contained true -p:PublishAot=true -o $linuxNativeOutput } 'Linux NativeAOT publish'
 Invoke-Checked { wsl.exe @wslDistributionArgs -- ($linuxNativeOutput + '/cascade') run /tmp/cascade-verification.cvm } 'Linux NativeAOT execution'
+$linuxNativeDemoOutput = $linuxPublishRoot + '/native-aot-game-of-life'
+Invoke-Checked { wsl.exe @wslDistributionArgs -- dotnet publish ($linuxRepositoryRoot + '/examples/Cascade.GameOfLife/Cascade.GameOfLife.csproj') -c Release -r linux-x64 --self-contained true -p:PublishAot=true -o $linuxNativeDemoOutput } 'Linux SIMD demo NativeAOT publish'
+Invoke-Checked { wsl.exe @wslDistributionArgs -- ($linuxNativeDemoOutput + '/Cascade.GameOfLife') --benchmark } 'Linux SIMD demo NativeAOT execution'
 Write-Output 'Managed and NativeAOT Linux verification passed.'

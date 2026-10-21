@@ -20,3 +20,39 @@ dotnet run --project examples\Cascade.Demos -- arithmetic masks memory capabilit
 Running without arguments, or with `all`, executes all demos. A failed result
 or unexpected VM state returns a nonzero exit code, so the same command is a
 useful smoke test.
+
+## Game of Life bytecode sample
+
+`Cascade.GameOfLife` loads a real portable Cascade module from
+[`life-rule.cvm`](Cascade.GameOfLife/life-rule.cvm). The module contains the
+vectorized Life rule and updates 16 cells at a time. Its readable instruction
+definition and host runner live together in
+[`Program.cs`](Cascade.GameOfLife/Program.cs).
+
+```powershell
+dotnet run --project examples\Cascade.GameOfLife
+```
+
+The runner checks that the committed bytecode exactly matches the readable
+instruction definition, simulates a glider and an R-pentomino on a wrapping
+32-by-16 board, and verifies an identical replay. Regenerate the bytecode
+deliberately with:
+
+```powershell
+dotnet run --project examples\Cascade.GameOfLife -- --write-module examples\Cascade.GameOfLife\life-rule.cvm
+```
+
+The expanded workload also cross-checks every result against a scalar Life
+implementation and reports cell throughput. Its benchmark preset uses a
+deterministic 256-by-256 seed for 50 generations without printing the board:
+
+```powershell
+dotnet run --project examples\Cascade.GameOfLife -c Release -- --benchmark
+```
+
+Override `--width`, `--height`, and `--generations` to scale the workload. The
+total cell count must be divisible by 16. Add `--verify-replay` to benchmark a
+second identical Cascade execution. The reference interpreter provides the
+semantic baseline. When hardware SIMD is available, the benchmark executes both
+backends, requires identical output, and reports the measured SIMD speedup and
+active hardware-vector width.
