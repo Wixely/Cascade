@@ -1,6 +1,6 @@
 # Cascade kernel language
 
-- Language version: 0.1
+- Language version: 0.2
 - File extension: `.cascade`
 - Compiler command: `cascade compile <input.cascade> [-o <output.cvm>]`
 
@@ -58,8 +58,9 @@ rejects it.
 
 ## Kernel ABI
 
-A source file contains exactly one kernel. Parameters are assigned to vector
-registers in declaration order, beginning with `v0`. Version 0.1 permits up to
+A source file contains one kernel and may declare helper functions before it.
+Kernel parameters are assigned to vector
+registers in declaration order, beginning with `v0`. Version 0.2 permits up to
 16 parameters so registers remain available for expressions. The returned
 vector is placed in `v0`, and compilation ends the module with `halt`.
 
@@ -67,20 +68,68 @@ vector is placed in `v0`, and compilation ends the module with `halt`.
 order; names must be unique and declared before use. Every kernel must end with
 one `return`, and statements after it are rejected.
 
+## Functions
+
+Typed helper functions use `fn`, the same parameter and return types as kernels,
+and lexical local bindings:
+
+```c
+fn add_amount(vector<i32> value, vector<i32> amount) -> vector<i32> {
+    return value + amount;
+}
+```
+
+The 0.2 compiler deterministically inlines helper calls. Recursion, including
+indirect recursion, is rejected. Inlining keeps CVM1 output independent of a
+source-level calling ABI and lets the compiler type-check every argument.
+
+## Bounded control flow and mutation
+
+`var` declares a mutable vector. Assignment is permitted only to `var`; kernel
+parameters and `let` bindings remain immutable. `repeat N` executes its block a
+compile-time constant number of times:
+
+```c
+var result = input;
+repeat 4 {
+    result = add_amount(result, 3);
+}
+```
+
+`N` must be between 1 and 1024. The compiler unrolls the block, so source code
+cannot introduce an unbounded loop and the VM's ordinary fuel accounting remains
+authoritative. Compiled modules are limited to 1,000,000 instructions.
+
+## Typed memory
+
+`load_i32(address)` and `load_i64(address)` load one 64-byte architectural
+vector and assign its source-level lane type. `store(address, value)` stores one
+64-byte vector. Addresses must be `vector<i64>`; as with the CVM1 `load` and
+`store` instructions, lane 0 supplies the unsigned byte address. Runtime bounds
+checking and trap-before-effect behavior are unchanged.
+
 ## Grammar
 
 ```text
-kernel      := "kernel" identifier "(" parameters? ")" "->" vector-type
-               "{" statement* "}"
+program     := function* kernel
+function    := "fn" signature block
+kernel      := "kernel" signature block
+signature   := identifier "(" parameters? ")" "->" vector-type
+block       := "{" statement* "}"
 parameters  := parameter ("," parameter)*
 parameter   := vector-type identifier
 vector-type := "vector" "<" ("i32" | "i64") ">"
 statement   := "let" identifier "=" expression ";"
+             | "var" identifier "=" expression ";"
+             | identifier "=" expression ";"
+             | "repeat" integer block
+             | "store" "(" expression "," expression ")" ";"
              | "return" expression ";"
 expression  := identifier | integer | "-" integer
              | "(" expression ")"
              | expression binary-operator expression
-             | "select" "(" expression "," expression "," expression ")"
+             | identifier "(" arguments? ")"
+arguments   := expression ("," expression)*
 ```
 
 Whitespace is insignificant. `//` begins a comment through the end of the
@@ -88,8 +137,8 @@ line. Diagnostics include a stable code plus one-based line and column.
 
 ## Current boundaries
 
-Language version 0.1 intentionally has no loops, branches, user functions,
-memory operations, imports, casts, mutable variables, or mask Boolean
-operators. These remain available at the bytecode level and can be added with
-corresponding type and safety rules. The compiler performs deterministic
-temporary-register allocation but does not yet optimize or spill.
+Language version 0.2 intentionally has no data-dependent branches, dynamic
+loops, gather/scatter syntax, imports, casts, or mask Boolean operators. These
+remain available at the bytecode level and can be added with corresponding type
+and safety rules. The compiler performs deterministic temporary-register
+allocation but does not yet optimize or spill.

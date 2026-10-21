@@ -37,6 +37,8 @@ Invoke-Checked { wsl.exe @wslDistributionArgs -- ($linuxPublishRoot + '/cli/casc
 Invoke-Checked { wsl.exe @wslDistributionArgs -- ($linuxPublishRoot + '/cli/cascade') run /tmp/cascade-verification.cvm } 'Linux CLI execution'
 Invoke-Checked { wsl.exe @wslDistributionArgs -- ($linuxPublishRoot + '/cli/cascade') compile ($linuxRepositoryRoot + '/examples/Cascade.GameOfLife/life-rule.cascade') -o /tmp/life-rule.cvm } 'Linux compiler CLI execution'
 Invoke-Checked { wsl.exe @wslDistributionArgs -- ($linuxPublishRoot + '/cli/cascade') run /tmp/life-rule.cvm } 'Linux compiled module execution'
+Invoke-Checked { wsl.exe @wslDistributionArgs -- ($linuxPublishRoot + '/cli/cascade') compile ($linuxRepositoryRoot + '/examples/Cascade.Demos/memory-transform.cascade') -o /tmp/memory-transform.cvm } 'Linux 0.2 compiler CLI execution'
+Invoke-Checked { wsl.exe @wslDistributionArgs -- ($linuxPublishRoot + '/cli/cascade') run /tmp/memory-transform.cvm } 'Linux 0.2 compiled module execution'
 
 wsl.exe @wslDistributionArgs -- which dotnet 2>$null | Out-Null
 $hasLinuxSdk = $LASTEXITCODE -eq 0
@@ -58,6 +60,7 @@ $linuxNativeOutput = $linuxPublishRoot + '/native-aot'
 Invoke-Checked { wsl.exe @wslDistributionArgs -- dotnet publish ($linuxRepositoryRoot + '/src/Cascade.Cli/Cascade.Cli.csproj') -c Release -r linux-x64 --self-contained true -p:PublishAot=true -o $linuxNativeOutput } 'Linux NativeAOT publish'
 Invoke-Checked { wsl.exe @wslDistributionArgs -- ($linuxNativeOutput + '/cascade') run /tmp/cascade-verification.cvm } 'Linux NativeAOT execution'
 Invoke-Checked { wsl.exe @wslDistributionArgs -- ($linuxNativeOutput + '/cascade') compile ($linuxRepositoryRoot + '/examples/Cascade.GameOfLife/life-rule.cascade') -o /tmp/life-rule-native.cvm } 'Linux NativeAOT compiler execution'
+Invoke-Checked { wsl.exe @wslDistributionArgs -- ($linuxNativeOutput + '/cascade') compile ($linuxRepositoryRoot + '/examples/Cascade.Demos/memory-transform.cascade') -o /tmp/memory-transform-native.cvm } 'Linux NativeAOT 0.2 compiler execution'
 $linuxNativeDemoOutput = $linuxPublishRoot + '/native-aot-game-of-life'
 Invoke-Checked { wsl.exe @wslDistributionArgs -- dotnet publish ($linuxRepositoryRoot + '/examples/Cascade.GameOfLife/Cascade.GameOfLife.csproj') -c Release -r linux-x64 --self-contained true -p:PublishAot=true -o $linuxNativeDemoOutput } 'Linux SIMD demo NativeAOT publish'
 Invoke-Checked { wsl.exe @wslDistributionArgs -- ($linuxNativeDemoOutput + '/Cascade.GameOfLife') --benchmark } 'Linux SIMD demo NativeAOT execution'

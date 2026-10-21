@@ -21,6 +21,15 @@ Running without arguments, or with `all`, executes all demos. A failed result
 or unexpected VM state returns a nonzero exit code, so the same command is a
 useful smoke test.
 
+The `source` demo compiles
+[`memory-transform.cascade`](Cascade.Demos/memory-transform.cascade), whose 0.2
+features include a typed helper function, mutable vector state, a bounded
+`repeat` block, and typed memory storage and loading:
+
+```powershell
+dotnet run --project examples\Cascade.Demos -- source
+```
+
 ## Game of Life bytecode sample
 
 `Cascade.GameOfLife` compiles the typed kernel source in

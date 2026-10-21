@@ -22,3 +22,4 @@ The initial decision queue is listed under [Open questions](../plan.md#open-ques
 - [Add a portable hardware-SIMD execution backend](2026-10-21-portable-hardware-simd-backend.md)
 - [Reuse VM instances for repeated kernel execution](2026-10-21-reusable-instance-execution.md)
 - [Add a typed kernel source language and compiler](2026-10-21-typed-kernel-source-language.md)
+- [Expand the source language to version 0.2](2026-10-21-source-language-0.2.md)

@@ -7,6 +7,9 @@ var tests = new (string Name, Action Body)[]
     ("i64 expressions compile and execute", I64Expressions),
     ("compilation is deterministic", DeterministicCompilation),
     ("invalid programs produce source diagnostics", InvalidPrograms),
+    ("functions and bounded repeats execute", FunctionsAndRepeats),
+    ("typed memory operations execute", TypedMemory),
+    ("version 0.2 safety rules reject invalid source", VersionTwoDiagnostics),
 };
 
 var failures = 0;
@@ -76,6 +79,65 @@ static void InvalidPrograms()
     Diagnostic("kernel bad(vector<i32> value) -> vector<i32> { return missing; }", "CAS105");
     Diagnostic("kernel bad(vector<i64> value) -> vector<i64> { return value * 2; }", "CAS112");
     Diagnostic("kernel bad(vector<i32> value) -> vector<i32> { let x = value + 1 return x; }", "CAS002");
+}
+
+static void FunctionsAndRepeats()
+{
+    const string source = """
+        fn increment(vector<i32> value, vector<i32> amount) -> vector<i32> {
+            return value + amount;
+        }
+
+        kernel accumulate(vector<i32> input) -> vector<i32> {
+            var result = input;
+            repeat 4 {
+                result = increment(result, 3);
+            }
+            return result;
+        }
+        """;
+    var instance = Compile(source).Instantiate(new VmOptions { MemorySize = 0 });
+    for (var lane = 0; lane < 16; lane++) instance.State.Register(0).WriteUInt32(lane, (uint)lane);
+    Success(instance.Execute());
+    for (var lane = 0; lane < 16; lane++) Equal((uint)(lane + 12), instance.State.Register(0).ReadUInt32(lane));
+}
+
+static void TypedMemory()
+{
+    const string i32Source = """
+        kernel roundtrip(vector<i64> address, vector<i32> input) -> vector<i32> {
+            store(address, input);
+            return load_i32(address);
+        }
+        """;
+    var instance = Compile(i32Source).Instantiate(new VmOptions { MemorySize = 64 });
+    instance.State.Register(0).WriteUInt64(0, 0);
+    for (var lane = 0; lane < 16; lane++) instance.State.Register(1).WriteUInt32(lane, (uint)(lane * 7));
+    Success(instance.Execute());
+    for (var lane = 0; lane < 16; lane++) Equal((uint)(lane * 7), instance.State.Register(0).ReadUInt32(lane));
+
+    const string i64Source = """
+        kernel roundtrip(vector<i64> address, vector<i64> input) -> vector<i64> {
+            store(address, input);
+            return load_i64(address);
+        }
+        """;
+    instance = Compile(i64Source).Instantiate(new VmOptions { MemorySize = 64 });
+    instance.State.Register(0).WriteUInt64(0, 0);
+    for (var lane = 0; lane < 8; lane++) instance.State.Register(1).WriteUInt64(lane, (ulong)(lane * 11));
+    Success(instance.Execute());
+    for (var lane = 0; lane < 8; lane++) Equal((ulong)(lane * 11), instance.State.Register(0).ReadUInt64(lane));
+}
+
+static void VersionTwoDiagnostics()
+{
+    Diagnostic("kernel bad(vector<i32> value) -> vector<i32> { repeat 0 { } return value; }", "CAS005");
+    Diagnostic("kernel bad(vector<i32> value) -> vector<i32> { value = value + 1; return value; }", "CAS116");
+    Diagnostic("kernel bad(vector<i32> address) -> vector<i32> { return load_i32(address); }", "CAS118");
+    Diagnostic("""
+        fn recurse(vector<i32> value) -> vector<i32> { return recurse(value); }
+        kernel bad(vector<i32> value) -> vector<i32> { return recurse(value); }
+        """, "CAS125");
 }
 
 static CascadeProgram Compile(string source)

@@ -222,6 +222,7 @@ Targets remain unset until the project is scheduled.
 | 6. Optimization readiness | Completed 2026-10-20 | Benchmark corpus and differential harness are ready for optimized-backend work |
 | 7. Portable hardware SIMD | Completed 2026-10-21 | Accelerated vector operations match complete reference state under differential tests |
 | 8. Typed kernel compiler | Completed 2026-10-21 | Game of Life compiles from typed source with semantic, diagnostic, and determinism tests |
+| 9. Source language 0.2 | Completed 2026-10-21 | Typed functions, bounded repetition, mutation, and memory operations compile and execute |
 
 ## Verification strategy
 
@@ -248,7 +249,8 @@ Targets remain unset until the project is scheduled.
 - [x] Implement and differentially verify a portable hardware-SIMD backend — Owner: Codex — Completed: 2026-10-21
 - [x] Profile dispatch and instance-creation overhead and add reusable instance execution — Owner: Codex — Completed: 2026-10-21
 - [x] Define a typed kernel language and compile Game of Life source to `CVM1` — Owner: Codex — Completed: 2026-10-21
-- [ ] Design typed memory access, functions, and bounded control flow for the source language — Owner: TBD — Due: TBD
+- [x] Design typed memory access, functions, and bounded control flow for source language 0.2 — Owner: Codex — Completed: 2026-10-21
+- [ ] Design typed gather/scatter and mask combinators for source language 0.3 — Owner: TBD — Due: TBD
 - [ ] Design and benchmark batched kernel execution before choosing an AVX2- or AVX-512-specific backend — Owner: TBD — Due: TBD
 
 ## Open questions

@@ -14,13 +14,15 @@ public sealed record CompilationResult(CascadeModule? Module, IReadOnlyList<Casc
 
 public static class CascadeCompiler
 {
+    public const string LanguageVersion = "0.2";
+
     public static CompilationResult Compile(string source)
     {
         ArgumentNullException.ThrowIfNull(source);
         try
         {
-            var kernel = new Parser(new Lexer(source).Lex()).ParseKernel();
-            return new(new Lowerer(kernel).Compile(), []);
+            var program = new Parser(new Lexer(source).Lex()).ParseProgram();
+            return new(new Lowerer(program).Compile(), []);
         }
         catch (CompilationFailure failure)
         {
@@ -165,26 +167,56 @@ internal enum SourceType
     MaskI64,
 }
 
+internal sealed record ProgramSyntax(IReadOnlyList<FunctionSyntax> Functions, KernelSyntax Kernel);
+internal sealed record FunctionSyntax(string Name, IReadOnlyList<ParameterSyntax> Parameters, SourceType ReturnType, IReadOnlyList<StatementSyntax> Statements, Token Token);
 internal sealed record KernelSyntax(string Name, IReadOnlyList<ParameterSyntax> Parameters, SourceType ReturnType, IReadOnlyList<StatementSyntax> Statements, Token Token);
 internal sealed record ParameterSyntax(SourceType Type, string Name, Token Token);
 internal abstract record StatementSyntax(Token Token);
 internal sealed record LetStatementSyntax(string Name, ExpressionSyntax Expression, Token Token) : StatementSyntax(Token);
+internal sealed record VarStatementSyntax(string Name, ExpressionSyntax Expression, Token Token) : StatementSyntax(Token);
+internal sealed record AssignmentStatementSyntax(string Name, ExpressionSyntax Expression, Token Token) : StatementSyntax(Token);
+internal sealed record RepeatStatementSyntax(int Count, IReadOnlyList<StatementSyntax> Statements, Token Token) : StatementSyntax(Token);
+internal sealed record StoreStatementSyntax(ExpressionSyntax Address, ExpressionSyntax Value, Token Token) : StatementSyntax(Token);
 internal sealed record ReturnStatementSyntax(ExpressionSyntax Expression, Token Token) : StatementSyntax(Token);
 internal abstract record ExpressionSyntax(Token Token);
 internal sealed record NameExpressionSyntax(string Name, Token Token) : ExpressionSyntax(Token);
 internal sealed record LiteralExpressionSyntax(ulong Value, bool Negative, Token Token) : ExpressionSyntax(Token);
 internal sealed record BinaryExpressionSyntax(ExpressionSyntax Left, Token Operator, ExpressionSyntax Right) : ExpressionSyntax(Operator);
-internal sealed record SelectExpressionSyntax(ExpressionSyntax Condition, ExpressionSyntax WhenTrue, ExpressionSyntax WhenFalse, Token Token) : ExpressionSyntax(Token);
+internal sealed record CallExpressionSyntax(string Name, IReadOnlyList<ExpressionSyntax> Arguments, Token Token) : ExpressionSyntax(Token);
 
 internal sealed class Parser(IReadOnlyList<Token> tokens)
 {
     private int _position;
 
-    public KernelSyntax ParseKernel()
+    public ProgramSyntax ParseProgram()
     {
+        var functions = new List<FunctionSyntax>();
+        while (Current.Kind == TokenKind.Identifier && Current.Text == "fn")
+            functions.Add(ParseFunction());
+
         var kernelToken = ExpectText("kernel");
         var name = Expect(TokenKind.Identifier, "Expected a kernel name.");
-        Expect(TokenKind.LeftParenthesis, "Expected '(' after the kernel name.");
+        var parameters = ParseParameters();
+        Expect(TokenKind.Arrow, "Expected '->' and a kernel return type.");
+        var returnType = ParseType(allowMask: false);
+        var statements = ParseBlock();
+        Expect(TokenKind.End, "Only functions followed by one kernel may appear in a source file.");
+        return new(functions, new(name.Text, parameters, returnType, statements, kernelToken));
+    }
+
+    private FunctionSyntax ParseFunction()
+    {
+        var functionToken = ExpectText("fn");
+        var name = Expect(TokenKind.Identifier, "Expected a function name.");
+        var parameters = ParseParameters();
+        Expect(TokenKind.Arrow, "Expected '->' and a function return type.");
+        var returnType = ParseType(allowMask: false);
+        return new(name.Text, parameters, returnType, ParseBlock(), functionToken);
+    }
+
+    private IReadOnlyList<ParameterSyntax> ParseParameters()
+    {
+        Expect(TokenKind.LeftParenthesis, "Expected '('.");
         var parameters = new List<ParameterSyntax>();
         if (Current.Kind != TokenKind.RightParenthesis)
         {
@@ -199,10 +231,12 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         }
 
         Expect(TokenKind.RightParenthesis, "Expected ')' after the parameters.");
-        Expect(TokenKind.Arrow, "Expected '->' and a kernel return type.");
-        var returnType = ParseType(allowMask: false);
-        Expect(TokenKind.LeftBrace, "Expected '{' before the kernel body.");
+        return parameters;
+    }
 
+    private IReadOnlyList<StatementSyntax> ParseBlock()
+    {
+        Expect(TokenKind.LeftBrace, "Expected '{' before the kernel body.");
         var statements = new List<StatementSyntax>();
         while (Current.Kind != TokenKind.RightBrace && Current.Kind != TokenKind.End)
         {
@@ -215,6 +249,15 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
                 Expect(TokenKind.Semicolon, "Expected ';' after the local binding.");
                 statements.Add(new LetStatementSyntax(localName.Text, expression, token));
             }
+            else if (Current.Text == "var")
+            {
+                var token = Advance();
+                var localName = Expect(TokenKind.Identifier, "Expected a variable name after 'var'.");
+                Expect(TokenKind.Equal, "Expected '=' after the variable name.");
+                var expression = ParseExpression();
+                Expect(TokenKind.Semicolon, "Expected ';' after the variable declaration.");
+                statements.Add(new VarStatementSyntax(localName.Text, expression, token));
+            }
             else if (Current.Text == "return")
             {
                 var token = Advance();
@@ -222,15 +265,41 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
                 Expect(TokenKind.Semicolon, "Expected ';' after the return expression.");
                 statements.Add(new ReturnStatementSyntax(expression, token));
             }
+            else if (Current.Text == "repeat")
+            {
+                var token = Advance();
+                var count = Expect(TokenKind.Number, "Expected a repeat count.");
+                if (!int.TryParse(count.Text, out var value) || value is < 1 or > 1024)
+                    throw Error("CAS005", "Repeat count must be between 1 and 1024.", count);
+                statements.Add(new RepeatStatementSyntax(value, ParseBlock(), token));
+            }
+            else if (Current.Text == "store")
+            {
+                var token = Advance();
+                Expect(TokenKind.LeftParenthesis, "Expected '(' after 'store'.");
+                var address = ParseExpression();
+                Expect(TokenKind.Comma, "Expected ',' after the store address.");
+                var value = ParseExpression();
+                Expect(TokenKind.RightParenthesis, "Expected ')' after store arguments.");
+                Expect(TokenKind.Semicolon, "Expected ';' after store.");
+                statements.Add(new StoreStatementSyntax(address, value, token));
+            }
+            else if (Current.Kind == TokenKind.Identifier && Peek.Kind == TokenKind.Equal)
+            {
+                var name = Advance();
+                Advance();
+                var expression = ParseExpression();
+                Expect(TokenKind.Semicolon, "Expected ';' after assignment.");
+                statements.Add(new AssignmentStatementSyntax(name.Text, expression, name));
+            }
             else
             {
-                throw Error("CAS002", "Expected a 'let' or 'return' statement.", Current);
+                throw Error("CAS002", "Expected a declaration, assignment, repeat, store, or return statement.", Current);
             }
         }
 
         Expect(TokenKind.RightBrace, "Expected '}' after the kernel body.");
-        Expect(TokenKind.End, "Only one kernel may appear in a source file.");
-        return new(name.Text, parameters, returnType, statements, kernelToken);
+        return statements;
     }
 
     private SourceType ParseType(bool allowMask)
@@ -294,15 +363,16 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         }
 
         var name = Expect(TokenKind.Identifier, "Expected an expression.");
-        if (name.Text == "select" && Match(TokenKind.LeftParenthesis))
+        if (Match(TokenKind.LeftParenthesis))
         {
-            var condition = ParseExpression();
-            Expect(TokenKind.Comma, "Expected ',' after the select condition.");
-            var whenTrue = ParseExpression();
-            Expect(TokenKind.Comma, "Expected ',' after the true select value.");
-            var whenFalse = ParseExpression();
-            Expect(TokenKind.RightParenthesis, "Expected ')' after select arguments.");
-            return new SelectExpressionSyntax(condition, whenTrue, whenFalse, name);
+            var arguments = new List<ExpressionSyntax>();
+            if (Current.Kind != TokenKind.RightParenthesis)
+            {
+                do arguments.Add(ParseExpression());
+                while (Match(TokenKind.Comma));
+            }
+            Expect(TokenKind.RightParenthesis, "Expected ')' after call arguments.");
+            return new CallExpressionSyntax(name.Text, arguments, name);
         }
 
         return new NameExpressionSyntax(name.Text, name);
@@ -350,96 +420,176 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
 
     private Token Advance() => tokens[_position++];
     private Token Current => tokens[_position];
+    private Token Peek => tokens[Math.Min(_position + 1, tokens.Count - 1)];
     private static CompilationFailure Error(string code, string message, Token token) => new(new(code, message, token.Line, token.Column));
 }
 
 internal sealed class Lowerer
 {
-    private readonly KernelSyntax _kernel;
-    private readonly Dictionary<string, SourceType> _types = new(StringComparer.Ordinal);
+    private const int MaximumInstructions = 1_000_000;
+    private readonly ProgramSyntax _program;
+    private readonly Dictionary<string, FunctionSyntax> _functions = new(StringComparer.Ordinal);
     private readonly Dictionary<ExpressionSyntax, SourceType> _expressionTypes = new();
-    private readonly Dictionary<string, Value> _values = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _activeCalls = new(StringComparer.Ordinal);
     private readonly bool[] _registers = new bool[32];
     private readonly bool[] _masks = new bool[8];
     private readonly List<Instruction> _instructions = [];
 
-    public Lowerer(KernelSyntax kernel) => _kernel = kernel;
+    public Lowerer(ProgramSyntax program) => _program = program;
 
     public CascadeModule Compile()
     {
         CheckSemantics();
-        for (var index = 0; index < _kernel.Parameters.Count; index++)
+        var scope = new ValueScope(null);
+        for (var index = 0; index < _program.Kernel.Parameters.Count; index++)
         {
             _registers[index] = true;
-            _values.Add(_kernel.Parameters[index].Name, new(_kernel.Parameters[index].Type, (byte)index, false));
+            scope.Define(_program.Kernel.Parameters[index].Name,
+                new(new(_program.Kernel.Parameters[index].Type, (byte)index, false), Mutable: false, OwnsStorage: false));
         }
 
-        foreach (var statement in _kernel.Statements)
-        {
-            switch (statement)
-            {
-                case LetStatementSyntax let:
-                    var local = Emit(let.Expression);
-                    _values.Add(let.Name, local with { Owned = false });
-                    break;
-                case ReturnStatementSyntax @return:
-                    var result = Emit(@return.Expression);
-                    if (result.Index != 0)
-                        _instructions.Add(new(Opcode.Move, Destination: 0, SourceA: result.Index));
-                    Release(result);
-                    _instructions.Add(new(Opcode.Halt));
-                    break;
-            }
-        }
-
+        var result = EmitStatements(_program.Kernel.Statements, scope);
+        if (result.Index != 0)
+            Add(new(Opcode.Move, Destination: 0, SourceA: result.Index), _program.Kernel.Token);
+        Release(result);
+        Add(new(Opcode.Halt), _program.Kernel.Token);
         return new(_instructions);
     }
 
     private void CheckSemantics()
     {
-        if (_kernel.Parameters.Count > 16)
-            throw Error("CAS100", "Kernels may currently declare at most 16 parameters (v0-v15).", _kernel.Token);
-
-        foreach (var parameter in _kernel.Parameters)
+        foreach (var function in _program.Functions)
         {
-            if (!_types.TryAdd(parameter.Name, parameter.Type))
-                throw Error("CAS101", $"'{parameter.Name}' is already declared.", parameter.Token);
+            if (function.Name is "select" or "load_i32" or "load_i64" or "store" || !_functions.TryAdd(function.Name, function))
+                throw Error("CAS114", $"Function name '{function.Name}' is reserved or duplicated.", function.Token);
         }
+        if (_functions.ContainsKey(_program.Kernel.Name))
+            throw Error("CAS114", $"Kernel name '{_program.Kernel.Name}' duplicates a function.", _program.Kernel.Token);
 
-        var sawReturn = false;
-        foreach (var statement in _kernel.Statements)
+        foreach (var function in _program.Functions)
+            CheckRoutine(function.Parameters, function.ReturnType, function.Statements, function.Token, "Function");
+        CheckRoutine(_program.Kernel.Parameters, _program.Kernel.ReturnType, _program.Kernel.Statements, _program.Kernel.Token, "Kernel");
+        RejectRecursiveFunctions();
+    }
+
+    private void RejectRecursiveFunctions()
+    {
+        var states = new Dictionary<string, byte>(StringComparer.Ordinal);
+        foreach (var function in _program.Functions) Visit(function);
+
+        void Visit(FunctionSyntax function)
         {
-            if (sawReturn)
-                throw Error("CAS102", "No statements may follow return.", statement.Token);
+            if (states.TryGetValue(function.Name, out var state) && state == 2) return;
+            states[function.Name] = 1;
+            foreach (var call in CallsIn(function.Statements))
+            {
+                if (!_functions.TryGetValue(call.Name, out var target)) continue;
+                if (states.TryGetValue(target.Name, out state) && state == 1)
+                    throw Error("CAS125", $"Recursive call to '{target.Name}' is not allowed.", call.Token);
+                Visit(target);
+            }
+            states[function.Name] = 2;
+        }
+    }
 
+    private static IEnumerable<CallExpressionSyntax> CallsIn(IEnumerable<StatementSyntax> statements)
+    {
+        foreach (var statement in statements)
+        {
+            var expressions = statement switch
+            {
+                LetStatementSyntax let => new[] { let.Expression },
+                VarStatementSyntax variable => new[] { variable.Expression },
+                AssignmentStatementSyntax assignment => new[] { assignment.Expression },
+                StoreStatementSyntax store => new[] { store.Address, store.Value },
+                ReturnStatementSyntax @return => new[] { @return.Expression },
+                _ => [],
+            };
+            foreach (var expression in expressions)
+                foreach (var call in CallsIn(expression)) yield return call;
+            if (statement is RepeatStatementSyntax repeat)
+                foreach (var call in CallsIn(repeat.Statements)) yield return call;
+        }
+    }
+
+    private static IEnumerable<CallExpressionSyntax> CallsIn(ExpressionSyntax expression)
+    {
+        if (expression is BinaryExpressionSyntax binary)
+        {
+            foreach (var call in CallsIn(binary.Left)) yield return call;
+            foreach (var call in CallsIn(binary.Right)) yield return call;
+        }
+        else if (expression is CallExpressionSyntax call)
+        {
+            yield return call;
+            foreach (var argument in call.Arguments)
+                foreach (var nested in CallsIn(argument)) yield return nested;
+        }
+    }
+
+    private void CheckRoutine(IReadOnlyList<ParameterSyntax> parameters, SourceType returnType, IReadOnlyList<StatementSyntax> statements, Token token, string kind)
+    {
+        if (parameters.Count > 16)
+            throw Error("CAS100", $"{kind}s may declare at most 16 parameters.", token);
+        var scope = new TypeScope(null);
+        foreach (var parameter in parameters)
+            DefineType(scope, parameter.Name, new(parameter.Type, Mutable: false), parameter.Token);
+        if (!CheckStatements(statements, scope, returnType, allowReturn: true))
+            throw Error("CAS104", $"The {kind.ToLowerInvariant()} must end with a return statement.", token);
+    }
+
+    private bool CheckStatements(IReadOnlyList<StatementSyntax> statements, TypeScope scope, SourceType returnType, bool allowReturn)
+    {
+        var sawReturn = false;
+        foreach (var statement in statements)
+        {
+            if (sawReturn) throw Error("CAS102", "No statements may follow return.", statement.Token);
             switch (statement)
             {
                 case LetStatementSyntax let:
-                    var type = TypeOf(let.Expression, null);
-                    if (!_types.TryAdd(let.Name, type))
-                        throw Error("CAS101", $"'{let.Name}' is already declared.", let.Token);
+                    DefineType(scope, let.Name, new(TypeOf(let.Expression, null, scope), Mutable: false), let.Token);
+                    break;
+                case VarStatementSyntax variable:
+                    var variableType = TypeOf(variable.Expression, null, scope);
+                    Require(IsVector(variableType), "CAS115", "Mutable variables must contain vectors.", variable.Token);
+                    DefineType(scope, variable.Name, new(variableType, Mutable: true), variable.Token);
+                    break;
+                case AssignmentStatementSyntax assignment:
+                    if (!scope.TryGet(assignment.Name, out var assigned))
+                        throw Error("CAS105", $"Unknown name '{assignment.Name}'.", assignment.Token);
+                    Require(assigned.Mutable, "CAS116", $"'{assignment.Name}' is immutable.", assignment.Token);
+                    var assignedType = TypeOf(assignment.Expression, assigned.Type, scope);
+                    Require(assignedType == assigned.Type, "CAS117", "Assignment type does not match the variable type.", assignment.Token);
+                    break;
+                case RepeatStatementSyntax repeat:
+                    CheckStatements(repeat.Statements, new(scope), returnType, allowReturn: false);
+                    break;
+                case StoreStatementSyntax store:
+                    Require(TypeOf(store.Address, SourceType.VectorI64, scope) == SourceType.VectorI64,
+                        "CAS118", "Store addresses must be vector<i64>.", store.Address.Token);
+                    Require(IsVector(TypeOf(store.Value, null, scope)), "CAS119", "Store values must be vectors.", store.Value.Token);
                     break;
                 case ReturnStatementSyntax @return:
-                    var returnType = TypeOf(@return.Expression, _kernel.ReturnType);
-                    Require(returnType == _kernel.ReturnType, "CAS103", $"Return type is {Display(returnType)}; expected {Display(_kernel.ReturnType)}.", @return.Token);
+                    Require(allowReturn, "CAS120", "Return is not allowed inside repeat.", @return.Token);
+                    var actual = TypeOf(@return.Expression, returnType, scope);
+                    Require(actual == returnType, "CAS103", $"Return type is {Display(actual)}; expected {Display(returnType)}.", @return.Token);
                     sawReturn = true;
                     break;
             }
         }
-
-        if (!sawReturn)
-            throw Error("CAS104", "The kernel must end with a return statement.", _kernel.Token);
+        return sawReturn;
     }
 
-    private SourceType TypeOf(ExpressionSyntax expression, SourceType? expected)
+    private SourceType TypeOf(ExpressionSyntax expression, SourceType? expected, TypeScope scope)
     {
         if (_expressionTypes.TryGetValue(expression, out var cached)) return cached;
         SourceType type;
         switch (expression)
         {
             case NameExpressionSyntax name:
-                if (!_types.TryGetValue(name.Name, out type))
+                if (!scope.TryGet(name.Name, out var symbol))
                     throw Error("CAS105", $"Unknown name '{name.Name}'.", name.Token);
+                type = symbol.Type;
                 break;
             case LiteralExpressionSyntax literal:
                 if (expected is not SourceType.VectorI32 and not SourceType.VectorI64)
@@ -448,60 +598,167 @@ internal sealed class Lowerer
                 type = expected.Value;
                 break;
             case BinaryExpressionSyntax binary:
-                type = TypeOfBinary(binary, expected);
+                type = TypeOfBinary(binary, expected, scope);
                 break;
-            case SelectExpressionSyntax select:
-                var conditionType = TypeOf(select.Condition, null);
-                Require(IsMask(conditionType), "CAS107", "The first select argument must be a mask.", select.Condition.Token);
-                var selectValueType = expected is SourceType.VectorI32 or SourceType.VectorI64 ? expected : VectorType(conditionType);
-                var trueType = TypeOf(select.WhenTrue, selectValueType);
-                Require(IsVector(trueType), "CAS108", "Select values must be vectors.", select.WhenTrue.Token);
-                var falseType = TypeOf(select.WhenFalse, trueType);
-                Require(falseType == trueType, "CAS109", "Both select values must have the same type.", select.WhenFalse.Token);
-                Require(LaneType(conditionType) == LaneType(trueType), "CAS110", "The select mask and values must have the same lane type.", select.Token);
-                type = trueType;
+            case CallExpressionSyntax call:
+                type = TypeOfCall(call, expected, scope);
                 break;
             default:
                 throw new InvalidOperationException();
         }
-
         _expressionTypes.Add(expression, type);
         return type;
     }
 
-    private SourceType TypeOfBinary(BinaryExpressionSyntax binary, SourceType? expected)
+    private SourceType TypeOfCall(CallExpressionSyntax call, SourceType? expected, TypeScope scope)
+    {
+        if (call.Name == "select")
+        {
+            Require(call.Arguments.Count == 3, "CAS121", "select requires three arguments.", call.Token);
+            var conditionType = TypeOf(call.Arguments[0], null, scope);
+            Require(IsMask(conditionType), "CAS107", "The first select argument must be a mask.", call.Arguments[0].Token);
+            var valueType = expected is SourceType.VectorI32 or SourceType.VectorI64 ? expected.Value : VectorType(conditionType);
+            var trueType = TypeOf(call.Arguments[1], valueType, scope);
+            var falseType = TypeOf(call.Arguments[2], trueType, scope);
+            Require(IsVector(trueType) && falseType == trueType, "CAS109", "Both select values must have the same vector type.", call.Token);
+            Require(LaneType(conditionType) == LaneType(trueType), "CAS110", "The select mask and values must have the same lane type.", call.Token);
+            return trueType;
+        }
+
+        if (call.Name is "load_i32" or "load_i64")
+        {
+            Require(call.Arguments.Count == 1, "CAS121", $"{call.Name} requires one address argument.", call.Token);
+            Require(TypeOf(call.Arguments[0], SourceType.VectorI64, scope) == SourceType.VectorI64,
+                "CAS118", "Load addresses must be vector<i64>.", call.Arguments[0].Token);
+            return call.Name == "load_i32" ? SourceType.VectorI32 : SourceType.VectorI64;
+        }
+
+        if (!_functions.TryGetValue(call.Name, out var function))
+            throw Error("CAS122", $"Unknown function '{call.Name}'.", call.Token);
+        Require(call.Arguments.Count == function.Parameters.Count, "CAS123",
+            $"Function '{call.Name}' expects {function.Parameters.Count} arguments; received {call.Arguments.Count}.", call.Token);
+        for (var index = 0; index < call.Arguments.Count; index++)
+        {
+            var actual = TypeOf(call.Arguments[index], function.Parameters[index].Type, scope);
+            Require(actual == function.Parameters[index].Type, "CAS124", $"Argument {index + 1} has the wrong type.", call.Arguments[index].Token);
+        }
+        return function.ReturnType;
+    }
+
+    private SourceType TypeOfBinary(BinaryExpressionSyntax binary, SourceType? expected, TypeScope scope)
     {
         var contextual = expected is SourceType.VectorI32 or SourceType.VectorI64 ? expected : null;
         SourceType leftType;
         SourceType rightType;
         if (binary.Left is LiteralExpressionSyntax && binary.Right is not LiteralExpressionSyntax)
         {
-            rightType = TypeOf(binary.Right, contextual);
-            leftType = TypeOf(binary.Left, rightType);
+            rightType = TypeOf(binary.Right, contextual, scope);
+            leftType = TypeOf(binary.Left, rightType, scope);
         }
         else
         {
-            leftType = TypeOf(binary.Left, contextual);
-            rightType = TypeOf(binary.Right, leftType);
+            leftType = TypeOf(binary.Left, contextual, scope);
+            rightType = TypeOf(binary.Right, leftType, scope);
         }
-
         Require(IsVector(leftType) && rightType == leftType, "CAS111", "Binary operands must be vectors with the same lane type.", binary.Operator);
         if (binary.Operator.Kind == TokenKind.Star && leftType == SourceType.VectorI64)
             throw Error("CAS112", "i64 multiplication is not supported by CVM1.", binary.Operator);
-        return binary.Operator.Kind switch
-        {
-            TokenKind.EqualEqual or TokenKind.Less => MaskType(leftType),
-            TokenKind.Plus or TokenKind.Minus or TokenKind.Star or TokenKind.Ampersand or TokenKind.Pipe or TokenKind.Caret => leftType,
-            _ => throw new InvalidOperationException(),
-        };
+        return binary.Operator.Kind is TokenKind.EqualEqual or TokenKind.Less ? MaskType(leftType) : leftType;
     }
 
-    private Value Emit(ExpressionSyntax expression) => expression switch
+    private Value EmitStatements(IReadOnlyList<StatementSyntax> statements, ValueScope scope)
     {
-        NameExpressionSyntax name => _values[name.Name],
+        foreach (var statement in statements)
+        {
+            switch (statement)
+            {
+                case LetStatementSyntax let:
+                    var local = Emit(let.Expression, scope);
+                    scope.Define(let.Name, new(local with { Owned = false }, Mutable: false, OwnsStorage: local.Owned));
+                    break;
+                case VarStatementSyntax variable:
+                    var initial = Emit(variable.Expression, scope);
+                    var storage = initial.Owned ? initial : Copy(initial, variable.Token);
+                    scope.Define(variable.Name, new(storage with { Owned = false }, Mutable: true, OwnsStorage: true));
+                    break;
+                case AssignmentStatementSyntax assignment:
+                    var target = scope.Get(assignment.Name);
+                    var assigned = Emit(assignment.Expression, scope);
+                    if (assigned.Index != target.Value.Index)
+                        Add(new(Opcode.Move, Destination: target.Value.Index, SourceA: assigned.Index), assignment.Token);
+                    Release(assigned);
+                    break;
+                case RepeatStatementSyntax repeat:
+                    for (var iteration = 0; iteration < repeat.Count; iteration++)
+                    {
+                        var child = new ValueScope(scope);
+                        _ = EmitStatementsWithoutReturn(repeat.Statements, child);
+                        Dispose(child);
+                    }
+                    break;
+                case StoreStatementSyntax store:
+                    var address = Emit(store.Address, scope);
+                    var value = Emit(store.Value, scope);
+                    Add(new(Opcode.Store, SourceA: address.Index, SourceB: value.Index), store.Token);
+                    Release(address);
+                    Release(value);
+                    break;
+                case ReturnStatementSyntax @return:
+                    return Emit(@return.Expression, scope);
+            }
+        }
+        throw new InvalidOperationException("Semantics require a return statement.");
+    }
+
+    private bool EmitStatementsWithoutReturn(IReadOnlyList<StatementSyntax> statements, ValueScope scope)
+    {
+        foreach (var statement in statements)
+        {
+            if (statement is ReturnStatementSyntax) throw new InvalidOperationException();
+            switch (statement)
+            {
+                case LetStatementSyntax let:
+                    var local = Emit(let.Expression, scope);
+                    scope.Define(let.Name, new(local with { Owned = false }, Mutable: false, OwnsStorage: local.Owned));
+                    break;
+                case VarStatementSyntax variable:
+                    var initial = Emit(variable.Expression, scope);
+                    var storage = initial.Owned ? initial : Copy(initial, variable.Token);
+                    scope.Define(variable.Name, new(storage with { Owned = false }, Mutable: true, OwnsStorage: true));
+                    break;
+                case AssignmentStatementSyntax assignment:
+                    var target = scope.Get(assignment.Name);
+                    var assigned = Emit(assignment.Expression, scope);
+                    if (assigned.Index != target.Value.Index)
+                        Add(new(Opcode.Move, Destination: target.Value.Index, SourceA: assigned.Index), assignment.Token);
+                    Release(assigned);
+                    break;
+                case RepeatStatementSyntax repeat:
+                    for (var iteration = 0; iteration < repeat.Count; iteration++)
+                    {
+                        var child = new ValueScope(scope);
+                        EmitStatementsWithoutReturn(repeat.Statements, child);
+                        Dispose(child);
+                    }
+                    break;
+                case StoreStatementSyntax store:
+                    var address = Emit(store.Address, scope);
+                    var value = Emit(store.Value, scope);
+                    Add(new(Opcode.Store, SourceA: address.Index, SourceB: value.Index), store.Token);
+                    Release(address);
+                    Release(value);
+                    break;
+            }
+        }
+        return false;
+    }
+
+    private Value Emit(ExpressionSyntax expression, ValueScope scope) => expression switch
+    {
+        NameExpressionSyntax name => scope.Get(name.Name).Value with { Owned = false },
         LiteralExpressionSyntax literal => EmitLiteral(literal),
-        BinaryExpressionSyntax binary => EmitBinary(binary),
-        SelectExpressionSyntax select => EmitSelect(select),
+        BinaryExpressionSyntax binary => EmitBinary(binary, scope),
+        CallExpressionSyntax call => EmitCall(call, scope),
         _ => throw new InvalidOperationException(),
     };
 
@@ -510,44 +767,91 @@ internal sealed class Lowerer
         var type = _expressionTypes[literal];
         var register = AllocateRegister(literal.Token);
         var value = literal.Negative ? unchecked(0UL - literal.Value) : literal.Value;
-        _instructions.Add(new(type == SourceType.VectorI32 ? Opcode.SplatI32 : Opcode.SplatI64, Destination: register, Immediate: value));
+        Add(new(type == SourceType.VectorI32 ? Opcode.SplatI32 : Opcode.SplatI64, Destination: register, Immediate: value), literal.Token);
         return new(type, register, true);
     }
 
-    private Value EmitBinary(BinaryExpressionSyntax binary)
+    private Value EmitBinary(BinaryExpressionSyntax binary, ValueScope scope)
     {
-        var left = Emit(binary.Left);
-        var right = Emit(binary.Right);
+        var left = Emit(binary.Left, scope);
+        var right = Emit(binary.Right, scope);
         var type = _expressionTypes[binary];
         if (IsMask(type))
         {
             var mask = AllocateMask(binary.Token);
-            _instructions.Add(new(ComparisonOpcode(binary.Operator.Kind, left.Type), SourceA: left.Index, SourceB: right.Index, Mask: mask));
+            Add(new(ComparisonOpcode(binary.Operator.Kind, left.Type), SourceA: left.Index, SourceB: right.Index, Mask: mask), binary.Token);
             Release(left);
             Release(right);
             return new(type, mask, true);
         }
-
         var destination = left.Owned ? left.Index : right.Owned ? right.Index : AllocateRegister(binary.Token);
-        _instructions.Add(new(VectorOpcode(binary.Operator.Kind, type), Destination: destination, SourceA: left.Index, SourceB: right.Index));
+        Add(new(VectorOpcode(binary.Operator.Kind, type), Destination: destination, SourceA: left.Index, SourceB: right.Index), binary.Token);
         if (left.Owned && left.Index != destination) Release(left);
         if (right.Owned && right.Index != destination) Release(right);
         return new(type, destination, true);
     }
 
-    private Value EmitSelect(SelectExpressionSyntax select)
+    private Value EmitCall(CallExpressionSyntax call, ValueScope scope)
     {
-        var condition = Emit(select.Condition);
-        var whenTrue = Emit(select.WhenTrue);
-        var whenFalse = Emit(select.WhenFalse);
-        var destination = whenTrue.Owned ? whenTrue.Index : whenFalse.Owned ? whenFalse.Index : AllocateRegister(select.Token);
-        var type = _expressionTypes[select];
-        _instructions.Add(new(type == SourceType.VectorI32 ? Opcode.SelectI32 : Opcode.SelectI64,
-            Destination: destination, SourceA: whenTrue.Index, SourceB: whenFalse.Index, Mask: condition.Index));
+        if (call.Name == "select") return EmitSelect(call, scope);
+        if (call.Name is "load_i32" or "load_i64")
+        {
+            var address = Emit(call.Arguments[0], scope);
+            var destination = AllocateRegister(call.Token);
+            Add(new(Opcode.Load, Destination: destination, SourceA: address.Index), call.Token);
+            Release(address);
+            return new(_expressionTypes[call], destination, true);
+        }
+
+        var function = _functions[call.Name];
+        if (!_activeCalls.Add(function.Name))
+            throw Error("CAS125", $"Recursive call to '{function.Name}' is not allowed.", call.Token);
+        var arguments = call.Arguments.Select(argument => Emit(argument, scope)).ToArray();
+        var functionScope = new ValueScope(null);
+        for (var index = 0; index < arguments.Length; index++)
+            functionScope.Define(function.Parameters[index].Name, new(arguments[index] with { Owned = false }, Mutable: false, OwnsStorage: false));
+        var returned = EmitStatements(function.Statements, functionScope);
+        var copy = Copy(returned, call.Token);
+        Release(returned);
+        Dispose(functionScope);
+        foreach (var argument in arguments) Release(argument);
+        _activeCalls.Remove(function.Name);
+        return copy;
+    }
+
+    private Value EmitSelect(CallExpressionSyntax call, ValueScope scope)
+    {
+        var condition = Emit(call.Arguments[0], scope);
+        var whenTrue = Emit(call.Arguments[1], scope);
+        var whenFalse = Emit(call.Arguments[2], scope);
+        var destination = whenTrue.Owned ? whenTrue.Index : whenFalse.Owned ? whenFalse.Index : AllocateRegister(call.Token);
+        var type = _expressionTypes[call];
+        Add(new(type == SourceType.VectorI32 ? Opcode.SelectI32 : Opcode.SelectI64,
+            Destination: destination, SourceA: whenTrue.Index, SourceB: whenFalse.Index, Mask: condition.Index), call.Token);
         Release(condition);
         if (whenTrue.Owned && whenTrue.Index != destination) Release(whenTrue);
         if (whenFalse.Owned && whenFalse.Index != destination) Release(whenFalse);
         return new(type, destination, true);
+    }
+
+    private Value Copy(Value source, Token token)
+    {
+        var destination = AllocateRegister(token);
+        Add(new(Opcode.Move, Destination: destination, SourceA: source.Index), token);
+        return new(source.Type, destination, true);
+    }
+
+    private void Dispose(ValueScope scope)
+    {
+        foreach (var binding in scope.Bindings)
+            if (binding.OwnsStorage) Release(binding.Value with { Owned = true });
+    }
+
+    private void Add(Instruction instruction, Token token)
+    {
+        if (_instructions.Count >= MaximumInstructions)
+            throw Error("CAS202", $"Compiled kernels may contain at most {MaximumInstructions} instructions.", token);
+        _instructions.Add(instruction);
     }
 
     private byte AllocateRegister(Token token)
@@ -631,8 +935,41 @@ internal sealed class Lowerer
         if (!condition) throw Error(code, message, token);
     }
 
+    private static void DefineType(TypeScope scope, string name, TypeBinding binding, Token token)
+    {
+        if (scope.TryGet(name, out _)) throw Error("CAS101", $"'{name}' is already declared.", token);
+        scope.Define(name, binding);
+    }
+
     private static CompilationFailure Error(string code, string message, Token token) => new(new(code, message, token.Line, token.Column));
     private readonly record struct Value(SourceType Type, byte Index, bool Owned);
+    private readonly record struct TypeBinding(SourceType Type, bool Mutable);
+    private readonly record struct ValueBinding(Value Value, bool Mutable, bool OwnsStorage);
+
+    private sealed class TypeScope(TypeScope? parent)
+    {
+        private readonly Dictionary<string, TypeBinding> _bindings = new(StringComparer.Ordinal);
+
+        public void Define(string name, TypeBinding binding) => _bindings.Add(name, binding);
+
+        public bool TryGet(string name, out TypeBinding binding)
+        {
+            if (_bindings.TryGetValue(name, out binding)) return true;
+            return parent is not null && parent.TryGet(name, out binding);
+        }
+    }
+
+    private sealed class ValueScope(ValueScope? parent)
+    {
+        private readonly Dictionary<string, ValueBinding> _bindings = new(StringComparer.Ordinal);
+        public IEnumerable<ValueBinding> Bindings => _bindings.Values;
+
+        public void Define(string name, ValueBinding binding) => _bindings.Add(name, binding);
+
+        public ValueBinding Get(string name) => _bindings.TryGetValue(name, out var binding)
+            ? binding
+            : parent?.Get(name) ?? throw new InvalidOperationException($"Missing lowered symbol '{name}'.");
+    }
 }
 
 internal sealed class CompilationFailure(CascadeDiagnostic diagnostic) : Exception(diagnostic.Message)

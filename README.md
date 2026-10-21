@@ -9,7 +9,7 @@ memory, and a correctness-first reference interpreter.
 - Phase: Complete v0.1 MVP
 - Implementation: C# on .NET 10
 - Backends: Hardware-independent reference interpreter and portable hardware SIMD
-- Source compiler: Typed `.cascade` kernels to portable `CVM1` bytecode
+- Source compiler: Typed `.cascade` language version 0.2 to portable `CVM1` bytecode
 - Module container: Sectioned `CVM1` version `1.0`
 - Verified platforms: Windows x64 and Linux x64, managed self-contained and NativeAOT
 - License: [MIT](LICENSE)

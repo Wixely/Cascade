@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using Cascade.Compiler;
 using Cascade.Core;
 using Cascade.Runtime;
 
@@ -8,6 +9,7 @@ var demos = new Dictionary<string, (string Description, Action Run)>(StringCompa
     ["masks"] = ("Predicate comparison and masked selection", RunMasks),
     ["memory"] = ("Deterministic scatter and gather through linear memory", RunMemory),
     ["capability"] = ("An explicitly declared and bound host capability", RunCapability),
+    ["source"] = ("Compile functions, bounded repetition, and typed memory from source", RunSourceKernel),
 };
 
 if (args is ["list"])
@@ -151,6 +153,27 @@ static void RunCapability()
     Console.WriteLine($"input     {Format(values)}");
     Console.WriteLine($"sum       {expected}");
     Console.WriteLine($"fuel used {instance.State.InitialFuel - instance.State.FuelRemaining} (includes declared import surcharge)");
+}
+
+static void RunSourceKernel()
+{
+    var sourcePath = Path.Combine(AppContext.BaseDirectory, "memory-transform.cascade");
+    var compilation = CascadeCompiler.Compile(File.ReadAllText(sourcePath));
+    if (!compilation.Succeeded)
+        throw new InvalidOperationException(string.Join(Environment.NewLine, compilation.Diagnostics));
+
+    var program = CascadeProgram.FromModule(compilation.Module!);
+    var instance = program.Instantiate(new VmOptions { MemorySize = 64 });
+    instance.State.Register(0).WriteUInt64(0, 0);
+    for (var lane = 0; lane < 16; lane++) instance.State.Register(1).WriteUInt32(lane, (uint)lane);
+    var result = instance.Execute();
+    if (!result.Succeeded) throw new InvalidOperationException($"VM trapped: {result.Trap!.Code} at instruction {result.Trap.InstructionPointer}");
+
+    var output = ReadI32(instance.State.Register(0));
+    for (var lane = 0; lane < 16; lane++) Equal(lane + 15, output[lane], $"compiled lane {lane}");
+    Console.WriteLine($"compiled  {Path.GetFileName(sourcePath)} ({program.InstructionCount} instructions)");
+    Console.WriteLine($"output    {Format(output)}");
+    Console.WriteLine("The kernel called a helper three times, stored the vector, and loaded it back.");
 }
 
 static HostCallStatus SumI64(HostCallContext context)

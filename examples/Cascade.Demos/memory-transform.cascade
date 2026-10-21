@@ -1,0 +1,17 @@
+// Source-language 0.2: helper functions, mutable vectors, bounded repetition,
+// and typed access to one full 64-byte memory register.
+fn add_amount(vector<i32> value, vector<i32> amount) -> vector<i32> {
+    return value + amount;
+}
+
+kernel memory_transform(
+    vector<i64> address,
+    vector<i32> input
+) -> vector<i32> {
+    var output = input;
+    repeat 3 {
+        output = add_amount(output, 5);
+    }
+    store(address, output);
+    return load_i32(address);
+}

@@ -43,5 +43,5 @@ require its compiled bytes to match the committed `life-rule.cvm` artifact.
 
 - [x] Compile and execute the Game of Life kernel from source — Owner: Codex — Completed: 2026-10-21
 - [x] Add compiler semantic, diagnostic, determinism, and execution tests — Owner: Codex — Completed: 2026-10-21
-- [ ] Design typed memory access, functions, and bounded control flow — Owner: TBD — Due: TBD
+- [x] Design typed memory access, functions, and bounded control flow — Owner: Codex — Completed: 2026-10-21
 - [ ] Add optimization and register spilling after representative kernels require them — Owner: TBD — Due: TBD
