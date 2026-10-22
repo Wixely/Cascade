@@ -224,6 +224,7 @@ Targets remain unset until the project is scheduled.
 | 8. Typed kernel compiler | Completed 2026-10-21 | Game of Life compiles from typed source with semantic, diagnostic, and determinism tests |
 | 9. Source language 0.2 | Completed 2026-10-21 | Typed functions, bounded repetition, mutation, and memory operations compile and execute |
 | 10. Source language 0.3 | Completed 2026-10-22 | Typed gather/scatter and mask combinators compile and execute without leaking register-pair constraints |
+| 11. Local compiler optimization | Completed 2026-10-22 | Last-use register release, conservative dead-binding removal, and mask identities have regression coverage |
 
 ## Verification strategy
 
@@ -252,7 +253,8 @@ Targets remain unset until the project is scheduled.
 - [x] Define a typed kernel language and compile Game of Life source to `CVM1` — Owner: Codex — Completed: 2026-10-21
 - [x] Design typed memory access, functions, and bounded control flow for source language 0.2 — Owner: Codex — Completed: 2026-10-21
 - [x] Design typed gather/scatter and mask combinators for source language 0.3 — Owner: Codex — Completed: 2026-10-22
-- [ ] Add a typed compiler IR with liveness and dead-code elimination — Owner: TBD — Due: TBD
+- [x] Add local liveness-aware register release, conservative dead-binding removal, and mask simplification — Owner: Codex — Completed: 2026-10-22
+- [ ] Introduce a typed compiler IR for global value propagation, broader dead-code elimination, and measured register allocation — Owner: TBD — Due: TBD
 - [ ] Design and benchmark batched kernel execution before choosing an AVX2- or AVX-512-specific backend — Owner: TBD — Due: TBD
 
 ## Open questions

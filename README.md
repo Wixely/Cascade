@@ -13,7 +13,7 @@ memory, and a correctness-first reference interpreter.
 - Module container: Sectioned `CVM1` version `1.0`
 - Verified platforms: Windows x64 and Linux x64, managed self-contained and NativeAOT
 - License: [MIT](LICENSE)
-- Last reviewed: 2026-10-21
+- Last reviewed: 2026-10-22
 
 The MVP implements data, arithmetic, bitwise, comparison, mask conversion,
 selection, memory, branch, call, return, constant, host-call, and halt instructions. Execution is

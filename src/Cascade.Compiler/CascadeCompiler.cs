@@ -459,8 +459,10 @@ internal sealed class Lowerer
         for (var index = 0; index < _program.Kernel.Parameters.Count; index++)
         {
             _registers[index] = true;
-            scope.Define(_program.Kernel.Parameters[index].Name,
-                new(new(_program.Kernel.Parameters[index].Type, (byte)index, false), Mutable: false, OwnsStorage: false));
+            var parameter = _program.Kernel.Parameters[index];
+            scope.Define(parameter.Name,
+                new(new(parameter.Type, (byte)index, false), mutable: false, ownsStorage: false,
+                    remainingUses: CountUses(parameter.Name, _program.Kernel.Statements)));
         }
 
         var result = EmitStatements(_program.Kernel.Statements, scope);
@@ -749,18 +751,28 @@ internal sealed class Lowerer
 
     private Value EmitStatements(IReadOnlyList<StatementSyntax> statements, ValueScope scope)
     {
-        foreach (var statement in statements)
+        for (var statementIndex = 0; statementIndex < statements.Count; statementIndex++)
         {
+            var statement = statements[statementIndex];
             switch (statement)
             {
                 case LetStatementSyntax let:
+                    var remainingUses = CountUses(let.Name, statements, statementIndex + 1);
+                    if (remainingUses == 0 && IsPure(let.Expression)) break;
                     var local = Emit(let.Expression, scope);
-                    scope.Define(let.Name, new(local with { Owned = false }, Mutable: false, OwnsStorage: local.Owned));
+                    if (remainingUses == 0)
+                    {
+                        Release(local);
+                        break;
+                    }
+                    scope.Define(let.Name, new(local with { Owned = false }, mutable: false,
+                        ownsStorage: local.Owned, remainingUses));
                     break;
                 case VarStatementSyntax variable:
                     var initial = Emit(variable.Expression, scope);
                     var storage = initial.Owned ? initial : Copy(initial, variable.Token);
-                    scope.Define(variable.Name, new(storage with { Owned = false }, Mutable: true, OwnsStorage: true));
+                    scope.Define(variable.Name, new(storage with { Owned = false }, mutable: true,
+                        ownsStorage: true, remainingUses: CountUses(variable.Name, statements, statementIndex + 1)));
                     break;
                 case AssignmentStatementSyntax assignment:
                     var target = scope.Get(assignment.Name);
@@ -796,19 +808,29 @@ internal sealed class Lowerer
 
     private bool EmitStatementsWithoutReturn(IReadOnlyList<StatementSyntax> statements, ValueScope scope)
     {
-        foreach (var statement in statements)
+        for (var statementIndex = 0; statementIndex < statements.Count; statementIndex++)
         {
+            var statement = statements[statementIndex];
             if (statement is ReturnStatementSyntax) throw new InvalidOperationException();
             switch (statement)
             {
                 case LetStatementSyntax let:
+                    var remainingUses = CountUses(let.Name, statements, statementIndex + 1);
+                    if (remainingUses == 0 && IsPure(let.Expression)) break;
                     var local = Emit(let.Expression, scope);
-                    scope.Define(let.Name, new(local with { Owned = false }, Mutable: false, OwnsStorage: local.Owned));
+                    if (remainingUses == 0)
+                    {
+                        Release(local);
+                        break;
+                    }
+                    scope.Define(let.Name, new(local with { Owned = false }, mutable: false,
+                        ownsStorage: local.Owned, remainingUses));
                     break;
                 case VarStatementSyntax variable:
                     var initial = Emit(variable.Expression, scope);
                     var storage = initial.Owned ? initial : Copy(initial, variable.Token);
-                    scope.Define(variable.Name, new(storage with { Owned = false }, Mutable: true, OwnsStorage: true));
+                    scope.Define(variable.Name, new(storage with { Owned = false }, mutable: true,
+                        ownsStorage: true, remainingUses: CountUses(variable.Name, statements, statementIndex + 1)));
                     break;
                 case AssignmentStatementSyntax assignment:
                     var target = scope.Get(assignment.Name);
@@ -842,7 +864,7 @@ internal sealed class Lowerer
 
     private Value Emit(ExpressionSyntax expression, ValueScope scope) => expression switch
     {
-        NameExpressionSyntax name => scope.Get(name.Name).Value with { Owned = false },
+        NameExpressionSyntax name => scope.Take(name.Name),
         LiteralExpressionSyntax literal => EmitLiteral(literal),
         BinaryExpressionSyntax binary => EmitBinary(binary, scope),
         CallExpressionSyntax call => EmitCall(call, scope),
@@ -880,6 +902,7 @@ internal sealed class Lowerer
 
     private Value EmitCall(CallExpressionSyntax call, ValueScope scope)
     {
+        if (TryEmitSimplifiedMask(call, scope, out var simplified)) return simplified;
         if (call.Name == "select") return EmitSelect(call, scope);
         if (call.Name is "load_i32" or "load_i64")
         {
@@ -901,7 +924,11 @@ internal sealed class Lowerer
         var arguments = call.Arguments.Select(argument => Emit(argument, scope)).ToArray();
         var functionScope = new ValueScope(null);
         for (var index = 0; index < arguments.Length; index++)
-            functionScope.Define(function.Parameters[index].Name, new(arguments[index] with { Owned = false }, Mutable: false, OwnsStorage: false));
+        {
+            var parameter = function.Parameters[index];
+            functionScope.Define(parameter.Name, new(arguments[index] with { Owned = false }, mutable: false,
+                ownsStorage: false, remainingUses: CountUses(parameter.Name, function.Statements)));
+        }
         var returned = EmitStatements(function.Statements, functionScope);
         var copy = Copy(returned, call.Token);
         Release(returned);
@@ -967,14 +994,16 @@ internal sealed class Lowerer
     }
 
     private Value EmitMaskConstant(CallExpressionSyntax call, bool all)
+        => EmitMaskConstant(_expressionTypes[call], call.Token, all);
+
+    private Value EmitMaskConstant(SourceType type, Token token, bool all)
     {
-        var type = _expressionTypes[call];
         var vectorType = VectorType(type);
-        var zero = AllocateRegister(call.Token);
-        Add(new(Opcode.Zero, Destination: zero), call.Token);
-        var mask = AllocateMask(call.Token);
+        var zero = AllocateRegister(token);
+        Add(new(Opcode.Zero, Destination: zero), token);
+        var mask = AllocateMask(token);
         Add(new(all ? ComparisonOpcode(TokenKind.EqualEqual, vectorType) : ComparisonOpcode(TokenKind.Less, vectorType),
-            SourceA: zero, SourceB: zero, Mask: mask), call.Token);
+            SourceA: zero, SourceB: zero, Mask: mask), token);
         Release(new Value(vectorType, zero, true));
         return new(type, mask, true);
     }
@@ -996,6 +1025,14 @@ internal sealed class Lowerer
     {
         var leftMask = Emit(call.Arguments[0], scope);
         var rightMask = Emit(call.Arguments[1], scope);
+        if (leftMask.Index == rightMask.Index)
+        {
+            if (call.Name is "mask_and" or "mask_or")
+                return leftMask.Owned ? leftMask : rightMask;
+            Release(leftMask);
+            Release(rightMask);
+            return EmitMaskConstant(_expressionTypes[call], call.Token, all: false);
+        }
         var left = MaterializeMask(leftMask, call.Token);
         var right = MaterializeMask(rightMask, call.Token);
         var opcode = call.Name switch
@@ -1061,6 +1098,86 @@ internal sealed class Lowerer
         Add(new(Opcode.Move, Destination: destination, SourceA: source.Index), token);
         return new(source.Type, destination, true);
     }
+
+    private bool TryEmitSimplifiedMask(CallExpressionSyntax call, ValueScope scope, out Value value)
+    {
+        value = default;
+        if (call.Name == "mask_not" && call.Arguments[0] is CallExpressionSyntax { Name: "mask_not" } nested)
+        {
+            value = Emit(nested.Arguments[0], scope);
+            return true;
+        }
+
+        if (call.Name is not ("mask_and" or "mask_or" or "mask_xor")) return false;
+        var neutral = call.Name == "mask_and" ? "mask_all_" : "mask_none_";
+        if (IsMaskConstant(call.Arguments[0], neutral))
+        {
+            value = Emit(call.Arguments[1], scope);
+            return true;
+        }
+        if (IsMaskConstant(call.Arguments[1], neutral))
+        {
+            value = Emit(call.Arguments[0], scope);
+            return true;
+        }
+        return false;
+    }
+
+    private static bool IsMaskConstant(ExpressionSyntax expression, string prefix) =>
+        expression is CallExpressionSyntax call && call.Name.StartsWith(prefix, StringComparison.Ordinal);
+
+    private static bool IsPure(ExpressionSyntax expression) => expression switch
+    {
+        NameExpressionSyntax or LiteralExpressionSyntax => true,
+        BinaryExpressionSyntax binary => IsPure(binary.Left) && IsPure(binary.Right),
+        CallExpressionSyntax call when call.Name is "select" or "mask_not" or "mask_and" or "mask_or" or "mask_xor" ||
+                                       call.Name.StartsWith("mask_all_", StringComparison.Ordinal) ||
+                                       call.Name.StartsWith("mask_none_", StringComparison.Ordinal) => call.Arguments.All(IsPure),
+        _ => false,
+    };
+
+    private static int CountUses(string name, IReadOnlyList<StatementSyntax> statements, int startIndex = 0)
+    {
+        var count = 0;
+        for (var index = startIndex; index < statements.Count; index++)
+        {
+            var statement = statements[index];
+            count = SaturatingAdd(count, statement switch
+            {
+                LetStatementSyntax let => CountUses(name, let.Expression),
+                VarStatementSyntax variable => CountUses(name, variable.Expression),
+                AssignmentStatementSyntax assignment => CountUses(name, assignment.Expression),
+                RepeatStatementSyntax repeat => SaturatingMultiply(repeat.Count, CountUses(name, repeat.Statements)),
+                StoreStatementSyntax store => SaturatingAdd(CountUses(name, store.Address), CountUses(name, store.Value)),
+                ScatterStatementSyntax scatter => CountUses(name, scatter.Arguments),
+                ReturnStatementSyntax @return => CountUses(name, @return.Expression),
+                _ => 0,
+            });
+        }
+        return count;
+    }
+
+    private static int CountUses(string name, ExpressionSyntax expression) => expression switch
+    {
+        NameExpressionSyntax candidate => candidate.Name == name ? 1 : 0,
+        BinaryExpressionSyntax binary => SaturatingAdd(CountUses(name, binary.Left), CountUses(name, binary.Right)),
+        CallExpressionSyntax call => CountUses(name, call.Arguments),
+        _ => 0,
+    };
+
+    private static int CountUses(string name, IReadOnlyList<ExpressionSyntax> expressions)
+    {
+        var count = 0;
+        foreach (var expression in expressions)
+            count = SaturatingAdd(count, CountUses(name, expression));
+        return count;
+    }
+
+    private static int SaturatingAdd(int left, int right) =>
+        left > int.MaxValue - right ? int.MaxValue : left + right;
+
+    private static int SaturatingMultiply(int left, int right) =>
+        left != 0 && right > int.MaxValue / left ? int.MaxValue : left * right;
 
     private void Dispose(ValueScope scope)
     {
@@ -1190,7 +1307,13 @@ internal sealed class Lowerer
     private readonly record struct Value(SourceType Type, byte Index, bool Owned);
     private readonly record struct RegisterPair(byte Index, bool Owned);
     private readonly record struct TypeBinding(SourceType Type, bool Mutable);
-    private readonly record struct ValueBinding(Value Value, bool Mutable, bool OwnsStorage);
+    private sealed class ValueBinding(Value value, bool mutable, bool ownsStorage, int remainingUses)
+    {
+        public Value Value { get; } = value;
+        public bool Mutable { get; } = mutable;
+        public bool OwnsStorage { get; set; } = ownsStorage;
+        public int RemainingUses { get; set; } = remainingUses;
+    }
 
     private sealed class TypeScope(TypeScope? parent)
     {
@@ -1215,6 +1338,20 @@ internal sealed class Lowerer
         public ValueBinding Get(string name) => _bindings.TryGetValue(name, out var binding)
             ? binding
             : parent?.Get(name) ?? throw new InvalidOperationException($"Missing lowered symbol '{name}'.");
+
+        public Value Take(string name)
+        {
+            var binding = Get(name);
+            if (binding.RemainingUses <= 0)
+                throw new InvalidOperationException($"Lowered symbol '{name}' has no remaining uses.");
+            binding.RemainingUses--;
+            if (binding.RemainingUses == 0 && !binding.Mutable && binding.OwnsStorage)
+            {
+                binding.OwnsStorage = false;
+                return binding.Value with { Owned = true };
+            }
+            return binding.Value with { Owned = false };
+        }
     }
 }
 

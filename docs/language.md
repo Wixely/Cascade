@@ -141,7 +141,21 @@ Mask constructors and combinators are:
 
 Binary combinators require identical mask types. Because CVM1 1.0 has no mask
 Boolean opcodes, the compiler lowers these operations through temporary 0/1
-vectors and reconstructs a correctly sized predicate mask.
+vectors and reconstructs a correctly sized predicate mask. The compiler folds
+neutral mask operands, double negation, and identical-mask Boolean operations
+before using that general lowering.
+
+## Compiler optimizations
+
+The compiler releases immutable binding storage after its final source use, so
+long expression chains reuse architectural registers instead of retaining every
+intermediate. It removes unused `let` expressions only when they are known not
+to trap or have effects. Loads, gathers, and helper calls are retained
+conservatively even when their values are unused.
+
+These are deterministic local lowering optimizations. Cascade does not yet have
+a general typed intermediate representation, global value propagation, register
+spilling, or broad dead-code elimination.
 
 ## Grammar
 
@@ -175,4 +189,5 @@ line. Diagnostics include a stable code plus one-based line and column.
 
 Language version 0.3 intentionally has no data-dependent branches, dynamic
 loops, imports, casts, mask parameters, or mask returns. The compiler performs
-deterministic temporary-register allocation but does not yet optimize or spill.
+deterministic local optimization and temporary-register allocation but does not
+spill.

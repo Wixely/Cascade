@@ -12,6 +12,8 @@ var tests = new (string Name, Action Body)[]
     ("version 0.2 safety rules reject invalid source", VersionTwoDiagnostics),
     ("typed gather and scatter execute", GatherAndScatter),
     ("mask combinators preserve lane semantics", MaskCombinators),
+    ("last-use release handles long expression chains", LastUseRelease),
+    ("dead bindings and mask identities are optimized", CompilerOptimizations),
 };
 
 var failures = 0;
@@ -203,6 +205,40 @@ static void MaskCombinators()
 
     Diagnostic("kernel bad(vector<i64> a) -> vector<i64> { return select(mask_all_i32(), a, 0); }", "CAS110");
     Diagnostic("kernel bad(vector<i64> a) -> vector<i64> { scatter_i64(a, a, mask_all_i32()); return a; }", "CAS128");
+}
+
+static void LastUseRelease()
+{
+    var statements = string.Join(Environment.NewLine, Enumerable.Range(1, 40)
+        .Select(index => $"let value{index} = value{index - 1} + 1;"));
+    var source = $$"""
+        kernel chain(vector<i32> value0) -> vector<i32> {
+            {{statements}}
+            return value40;
+        }
+        """;
+    var instance = Compile(source).Instantiate(new VmOptions { MemorySize = 0 });
+    Success(instance.Execute());
+    for (var lane = 0; lane < 16; lane++) Equal(40U, instance.State.Register(0).ReadUInt32(lane));
+}
+
+static void CompilerOptimizations()
+{
+    const string deadBinding = "kernel clean(vector<i32> input) -> vector<i32> { let unused = input + 123; return input; }";
+    Equal(1, Compile(deadBinding).InstructionCount);
+
+    const string neutralMask = "kernel clean(vector<i32> input) -> vector<i32> { return select(mask_and(input < 8, mask_all_i32()), input, 0); }";
+    Equal(6, Compile(neutralMask).InstructionCount);
+
+    const string identicalMasks = "kernel clean(vector<i32> input) -> vector<i32> { let active = input < 8; return select(mask_xor(active, active), input, 0); }";
+    Equal(8, Compile(identicalMasks).InstructionCount);
+
+    const string doubleNegation = "kernel clean(vector<i32> input) -> vector<i32> { return select(mask_not(mask_not(input < 8)), input, 0); }";
+    Equal(6, Compile(doubleNegation).InstructionCount);
+
+    const string trappingBinding = "kernel keep(vector<i64> address) -> vector<i64> { let unused = load_i64(address); return address; }";
+    var trapped = Compile(trappingBinding).Instantiate(new VmOptions { MemorySize = 0 }).Execute();
+    if (trapped.Succeeded) throw new InvalidOperationException("Unused trapping expression was removed.");
 }
 
 static CascadeProgram Compile(string source)
