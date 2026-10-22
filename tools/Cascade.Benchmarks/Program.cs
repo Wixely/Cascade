@@ -2,6 +2,8 @@ using System.Diagnostics;
 using Cascade.Core;
 using Cascade.Runtime;
 
+if (args.Contains("--batch", StringComparer.Ordinal)) return BatchBenchmark.Run(args.Contains("--quick", StringComparer.Ordinal));
+
 var iterations = args is ["--quick"] ? 25 : 100;
 var corpus = new (string Name, CascadeModule Module)[]
 {

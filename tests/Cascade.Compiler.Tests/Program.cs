@@ -14,6 +14,15 @@ var tests = new (string Name, Action Body)[]
     ("mask combinators preserve lane semantics", MaskCombinators),
     ("last-use release handles long expression chains", LastUseRelease),
     ("dead bindings and mask identities are optimized", CompilerOptimizations),
+    ("typed IR propagates values and reports pressure", TypedIrOptimization),
+    ("saved masks do not replay memory reads", SavedMaskSnapshot),
+    ("immutable bindings snapshot mutable variables", ImmutableSnapshot),
+    ("register reuse preserves earlier operands", OperandLifetime),
+    ("helper names do not collide with builtin prefixes", BuiltinPrefixes),
+    ("generated kernels match scalar and unoptimized oracles", CompilerDifferential.Run),
+    ("constant selection preserves literal type context", LiteralContext),
+    ("compiler bounds source and expansion work", CompilerLimits),
+    ("common expressions respect mutation and loop boundaries", CommonExpressions),
 };
 
 var failures = 0;
@@ -231,7 +240,7 @@ static void CompilerOptimizations()
     Equal(6, Compile(neutralMask).InstructionCount);
 
     const string identicalMasks = "kernel clean(vector<i32> input) -> vector<i32> { let active = input < 8; return select(mask_xor(active, active), input, 0); }";
-    Equal(8, Compile(identicalMasks).InstructionCount);
+    Equal(3, Compile(identicalMasks).InstructionCount);
 
     const string doubleNegation = "kernel clean(vector<i32> input) -> vector<i32> { return select(mask_not(mask_not(input < 8)), input, 0); }";
     Equal(6, Compile(doubleNegation).InstructionCount);
@@ -239,6 +248,30 @@ static void CompilerOptimizations()
     const string trappingBinding = "kernel keep(vector<i64> address) -> vector<i64> { let unused = load_i64(address); return address; }";
     var trapped = Compile(trappingBinding).Instantiate(new VmOptions { MemorySize = 0 }).Execute();
     if (trapped.Succeeded) throw new InvalidOperationException("Unused trapping expression was removed.");
+
+    const string eagerSelect = "kernel keep(vector<i64> address) -> vector<i64> { return select(mask_all_i64(), address, load_i64(address)); }";
+    trapped = Compile(eagerSelect).Instantiate(new VmOptions { MemorySize = 0 }).Execute();
+    if (trapped.Succeeded) throw new InvalidOperationException("An unselected trapping expression was removed.");
+}
+
+static void TypedIrOptimization()
+{
+    const string source = """
+        kernel simplify(vector<i32> input) -> vector<i32> {
+            let low = input < 8;
+            let high = mask_not(low);
+            let every = mask_or(low, high);
+            let stillEvery = mask_and(every, mask_all_i32());
+            let none = mask_xor(stillEvery, every);
+            return select(mask_not(none), input, 0);
+        }
+        """;
+    var result = CascadeCompiler.Compile(source);
+    if (!result.Succeeded) throw new InvalidOperationException(string.Join(Environment.NewLine, result.Diagnostics));
+    var metrics = result.Metrics ?? throw new InvalidOperationException("Compilation metrics were not reported.");
+    Equal(1, metrics.InstructionCount);
+    Equal(1, metrics.PeakVectorRegisters);
+    Equal(0, metrics.PeakMaskRegisters);
 }
 
 static CascadeProgram Compile(string source)
@@ -246,6 +279,124 @@ static CascadeProgram Compile(string source)
     var result = CascadeCompiler.Compile(source);
     if (!result.Succeeded) throw new InvalidOperationException(string.Join(Environment.NewLine, result.Diagnostics));
     return CascadeProgram.FromModule(result.Module!);
+}
+
+static void SavedMaskSnapshot()
+{
+    const string source = """
+        kernel saved(vector<i64> address, vector<i32> input) -> vector<i32> {
+            let inverted = mask_not(load_i32(address) < 8);
+            store(address, input);
+            return select(mask_not(inverted), input, 0);
+        }
+        """;
+    var instance = Compile(source).Instantiate(new VmOptions { MemorySize = 64 });
+    for (var lane = 0; lane < 16; lane++) instance.State.Register(1).WriteUInt32(lane, 100);
+    Success(instance.Execute());
+    for (var lane = 0; lane < 16; lane++) Equal(100U, instance.State.Register(0).ReadUInt32(lane));
+}
+
+static void ImmutableSnapshot()
+{
+    const string source = """
+        kernel saved(vector<i32> input) -> vector<i32> {
+            var current = input;
+            let saved = current;
+            current = current + 10;
+            return saved;
+        }
+        """;
+    var instance = Compile(source).Instantiate(new VmOptions { MemorySize = 0 });
+    Success(instance.Execute());
+    Equal(0U, instance.State.Register(0).ReadUInt32(0));
+}
+
+static void OperandLifetime()
+{
+    foreach (var expression in new[] { "x + (x + 1)", "x + (x + 1) * 2" })
+    {
+        var instance = Compile($"kernel nested(vector<i32> input) -> vector<i32> {{ let x = input + 3; return {expression}; }}")
+            .Instantiate(new VmOptions { MemorySize = 0 });
+        Success(instance.Execute());
+        Equal(expression.Contains('*') ? 11U : 7U, instance.State.Register(0).ReadUInt32(0));
+    }
+}
+
+static void BuiltinPrefixes()
+{
+    const string source = """
+        fn mask_all_custom(vector<i32> input) -> vector<i32> { return input + 9; }
+        kernel names(vector<i32> input) -> vector<i32> { return mask_all_custom(input); }
+        """;
+    var instance = Compile(source).Instantiate(new VmOptions { MemorySize = 0 });
+    Success(instance.Execute());
+    Equal(9U, instance.State.Register(0).ReadUInt32(0));
+}
+
+static void LiteralContext()
+{
+    foreach (var literal in new[] { "7", "(7 + 8)", "(7 + 8) * 2" })
+    {
+        var source = $"kernel literal(vector<i32> input) -> vector<i32> {{ let value = select(mask_none_i32(), input, {literal}); return value; }}";
+        var instance = Compile(source).Instantiate(new VmOptions { MemorySize = 0 });
+        Success(instance.Execute());
+        Equal(literal == "7" ? 7U : literal.Contains('*') ? 30U : 15U, instance.State.Register(0).ReadUInt32(0));
+    }
+}
+
+static void CompilerLimits()
+{
+    Diagnostic(new string(' ', 1_000_001), "CAS007");
+    Diagnostic("kernel deep(vector<i32> x) -> vector<i32> { return " + new string('(', 256) + "x" + new string(')', 256) + "; }", "CAS006");
+    Diagnostic("kernel deep(vector<i32> x) -> vector<i32> { return x" + string.Concat(Enumerable.Repeat(" + 1", 256)) + "; }", "CAS006");
+    Diagnostic("kernel large(vector<i32> x) -> vector<i32> { repeat 1024 { repeat 1024 { repeat 1024 { } } } return x; }", "CAS204");
+    var additions = string.Concat(Enumerable.Repeat(" + 1", 40));
+    var functions = string.Join(Environment.NewLine, Enumerable.Range(0, 4).Select(index =>
+        $"fn depth{index}(vector<i32> x) -> vector<i32> {{ return {(index == 3 ? "x" : $"depth{index + 1}(x)")}{additions}; }}"));
+    Diagnostic(functions + " kernel deep(vector<i32> x) -> vector<i32> { return depth0(x); }", "CAS204");
+}
+
+static void CommonExpressions()
+{
+    const string shared = """
+        kernel shared(vector<i32> input, vector<i32> other) -> vector<i32> {
+            let first = (input + other) * 3;
+            let second = (input + other) * 3;
+            return first + second;
+        }
+        """;
+    var optimized = CascadeCompiler.Compile(shared);
+    var baseline = CascadeCompiler.Compile(shared, new CompilationOptions { Optimize = false });
+    if (!optimized.Succeeded || !baseline.Succeeded || optimized.Metrics!.InstructionCount >= baseline.Metrics!.InstructionCount)
+        throw new InvalidOperationException("Common expression reuse did not reduce emitted instructions.");
+    var instance = CascadeProgram.FromModule(optimized.Module!).Instantiate(new VmOptions { MemorySize = 0 });
+    instance.State.Register(0).WriteUInt32(0, 2);
+    instance.State.Register(1).WriteUInt32(0, 4);
+    Success(instance.Execute());
+    Equal(36U, instance.State.Register(0).ReadUInt32(0));
+
+    const string loop = """
+        kernel mutation(vector<i32> input) -> vector<i32> {
+            var current = input;
+            let before = current + 1;
+            repeat 3 {
+                repeat 2 {
+                    let during = current + 1;
+                    current = during;
+                }
+            }
+            let after = current + 1;
+            return before + after;
+        }
+        """;
+    foreach (var optimize in new[] { false, true })
+    {
+        var compilation = CascadeCompiler.Compile(loop, new CompilationOptions { Optimize = optimize });
+        if (!compilation.Succeeded) throw new InvalidOperationException(string.Join(", ", compilation.Diagnostics));
+        instance = CascadeProgram.FromModule(compilation.Module!).Instantiate(new VmOptions { MemorySize = 0 });
+        Success(instance.Execute());
+        Equal(8U, instance.State.Register(0).ReadUInt32(0));
+    }
 }
 
 static void Diagnostic(string source, string expectedCode)

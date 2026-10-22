@@ -58,4 +58,54 @@ public sealed class CascadeInstance
 
     /// <summary>Restarts execution with fresh control state while preserving registers and linear memory.</summary>
     public void Restart() => _interpreter.Restart();
+
+    /// <summary>
+    /// Runs sequential kernels from packed 64-byte input registers and writes v0
+    /// after each successful invocation. Each invocation receives fresh control
+    /// state and the instance's original fuel allowance; memory and other vector
+    /// registers persist. Stops at the first trap without writing that output.
+    /// </summary>
+    public BatchExecutionResult ExecuteBatch(ReadOnlySpan<byte> inputs, Span<byte> outputs, int inputRegisterCount)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(inputRegisterCount);
+        if (inputRegisterCount > 32) throw new ArgumentOutOfRangeException(nameof(inputRegisterCount));
+        if (outputs.Length % VectorRegister.ByteCount != 0)
+            throw new ArgumentException("Outputs must contain whole 64-byte vectors.", nameof(outputs));
+        var count = outputs.Length / VectorRegister.ByteCount;
+        var stride = inputRegisterCount * VectorRegister.ByteCount;
+        if ((long)count * stride != inputs.Length)
+            throw new ArgumentException("Inputs must contain one packed register set per output vector.", nameof(inputs));
+        if (count != 0 && State.InitialFuel > ulong.MaxValue / (ulong)count)
+            throw new ArgumentException("The batch's maximum aggregate fuel exceeds UInt64 capacity.", nameof(outputs));
+        if (inputs.Overlaps(outputs))
+            throw new ArgumentException("Input and output buffers must not overlap.", nameof(outputs));
+        if (inputs.Overlaps(State.LinearMemory.Span) || ((ReadOnlySpan<byte>)outputs).Overlaps(State.LinearMemory.Span))
+            throw new ArgumentException("Batch buffers must not alias instance memory.");
+        for (var register = 0; register < 32; register++)
+        {
+            var bytes = State.Register(register).Bytes;
+            if (inputs.Overlaps(bytes) || ((ReadOnlySpan<byte>)outputs).Overlaps(bytes))
+                throw new ArgumentException("Batch buffers must not alias instance registers.");
+        }
+
+        ulong consumed = 0;
+        for (var item = 0; item < count; item++)
+        {
+            Restart();
+            var arguments = inputs.Slice(item * stride, stride);
+            for (var register = 0; register < inputRegisterCount; register++)
+                State.Register(register).ReadFrom(arguments.Slice(register * VectorRegister.ByteCount, VectorRegister.ByteCount));
+            var result = _interpreter.ExecuteCore();
+            consumed += result.FuelConsumed;
+            if (!result.Succeeded) return new(item, consumed, result.Trap);
+            State.Register(0).WriteTo(outputs.Slice(item * VectorRegister.ByteCount, VectorRegister.ByteCount));
+        }
+        return new(count, consumed, null);
+    }
+}
+
+/// <summary>Completed outputs and aggregate fuel, including the failing invocation if any.</summary>
+public sealed record BatchExecutionResult(int CompletedCount, ulong FuelConsumed, VmTrap? Trap)
+{
+    public bool Succeeded => Trap is null;
 }

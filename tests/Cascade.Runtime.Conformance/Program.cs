@@ -26,8 +26,12 @@ var tests = new (string Name, Action Body)[]
     ("golden CVM1 fixtures remain byte-stable", GoldenFixtures),
     ("constants and entry points execute", ConstantsAndEntryPoint),
     ("embedding facade loads, saves, and isolates instances", EmbeddingFacade),
+    ("validated modules cannot be mutated through collection casts", ImmutableModules),
     ("embedding facade selects execution backends", BackendSelection),
     ("instances restart with reusable data state", InstanceRestart),
+    ("batch execution matches manual restart and preserves failure boundaries", BatchExecution),
+    ("batch validation rejects malformed buffers before execution", BatchValidation),
+    ("batch invocations retain memory and charge host imports", BatchStateAndImports),
     ("host imports bind and precharge fuel", HostImports),
     ("host import failures are bounded and redacted", HostImportFailures),
     ("deterministic replay", Replay),
@@ -523,6 +527,138 @@ static void Replay()
     True(first.State.LinearMemory.Span.SequenceEqual(second.State.LinearMemory.Span), "Final memories differ.");
     Equal(first.State.InstructionPointer, second.State.InstructionPointer);
     Equal(first.State.FuelRemaining, second.State.FuelRemaining);
+}
+
+static void ImmutableModules()
+{
+    var instructions = new[] { new Instruction(Opcode.SplatI64, Immediate: 42), new Instruction(Opcode.Halt) };
+    var constant = new VectorConstant(new byte[64]);
+    var import = new ImportDefinition("test", "immutable", 1, 1);
+    var module = new CascadeModule(instructions, [constant], [new(0, 2)], [import]);
+    var program = CascadeProgram.FromModule(module);
+    instructions[0] = new(Opcode.SplatI64, Immediate: 99);
+    Throws<NotSupportedException>(() => ((IList<Instruction>)module.Instructions)[0] = instructions[0]);
+    Throws<NotSupportedException>(() => ((IList<VectorConstant>)module.Constants)[0] = new(new byte[64]));
+    Throws<NotSupportedException>(() => ((IList<FunctionDefinition>)module.Functions)[0] = new(1, 2));
+    Throws<NotSupportedException>(() => ((IList<ImportDefinition>)program.Imports)[0] = import with { FuelCost = 100 });
+    var instance = program.Instantiate(new VmOptions
+    {
+        MemorySize = 0,
+        ImportBindings = new Dictionary<ImportKey, HostImportHandler> { [new("test", "immutable", 1)] = _ => HostCallStatus.Success },
+    });
+    Success(instance.Execute());
+    Equal(42UL, instance.State.Register(0).ReadUInt64(0));
+    Throws<ArgumentException>(() => new CascadeModule(instructions, constants: [null!]));
+    Throws<ArgumentException>(() => new CascadeModule(instructions, imports: [null!]));
+}
+
+static void BatchExecution()
+{
+    var program = CascadeProgram.FromModule(new CascadeModule([
+        new(Opcode.AddI64, Destination: 0, SourceA: 0, SourceB: 1), new(Opcode.Halt)]));
+    var inputs = new byte[3 * 128];
+    var outputs = new byte[3 * 64];
+    for (var item = 0; item < 3; item++)
+        for (var lane = 0; lane < 8; lane++)
+        {
+            BinaryPrimitives.WriteUInt64LittleEndian(inputs.AsSpan(item * 128 + lane * 8), (ulong)(item + lane));
+            BinaryPrimitives.WriteUInt64LittleEndian(inputs.AsSpan(item * 128 + 64 + lane * 8), 11);
+        }
+    foreach (var backend in SimdInterpreter.IsSupported
+        ? new[] { ExecutionBackend.Reference, ExecutionBackend.HardwareSimd } : [ExecutionBackend.Reference])
+    {
+        var batch = program.Instantiate(new VmOptions { MemorySize = 0, Fuel = 2 }, backend);
+        var result = batch.ExecuteBatch(inputs, outputs, 2);
+        True(result.Succeeded, "Batch failed.");
+        Equal(3, result.CompletedCount);
+        Equal(6UL, result.FuelConsumed);
+        var manual = program.Instantiate(new VmOptions { MemorySize = 0, Fuel = 2 }, backend);
+        for (var item = 0; item < 3; item++)
+        {
+            manual.Restart();
+            manual.State.Register(0).ReadFrom(inputs.AsSpan(item * 128, 64));
+            manual.State.Register(1).ReadFrom(inputs.AsSpan(item * 128 + 64, 64));
+            Success(manual.Execute());
+            True(outputs.AsSpan(item * 64, 64).SequenceEqual(manual.State.Register(0).Bytes), "Manual output differs.");
+        }
+        for (var register = 0; register < 32; register++)
+            True(batch.State.Register(register).Bytes.SequenceEqual(manual.State.Register(register).Bytes), "Final registers differ.");
+        Equal(manual.State.InstructionPointer, batch.State.InstructionPointer);
+        Equal(manual.State.FuelRemaining, batch.State.FuelRemaining);
+    }
+
+    var load = CascadeProgram.FromModule(new CascadeModule([new(Opcode.Load, Destination: 0, SourceA: 0), new(Opcode.Halt)]));
+    inputs = new byte[3 * 64];
+    BinaryPrimitives.WriteUInt64LittleEndian(inputs.AsSpan(64), 1);
+    Array.Fill(outputs, (byte)0xAA);
+    var stopped = load.Instantiate(new VmOptions { MemorySize = 64 }).ExecuteBatch(inputs, outputs, 1);
+    Equal(1, stopped.CompletedCount);
+    Equal(TrapCode.InvalidMemoryAccess, stopped.Trap?.Code);
+    Equal(3UL, stopped.FuelConsumed);
+    True(outputs.AsSpan(0, 64).SequenceEqual(new byte[64]), "Successful output missing.");
+    True(outputs.AsSpan(64).ToArray().All(value => value == 0xAA), "Failed or unattempted outputs changed.");
+
+    var exhausted = program.Instantiate(new VmOptions { MemorySize = 0, Fuel = 1 }).ExecuteBatch(new byte[128], new byte[64], 2);
+    Equal(0, exhausted.CompletedCount);
+    Equal(TrapCode.FuelExhausted, exhausted.Trap?.Code);
+    Equal(1UL, exhausted.FuelConsumed);
+}
+
+static void BatchValidation()
+{
+    var program = CascadeProgram.FromModule(new CascadeModule([new(Opcode.Halt)]));
+    var instance = program.Instantiate(new VmOptions { MemorySize = 0 });
+    instance.State.Register(0).WriteUInt64(0, 42);
+    Throws<ArgumentException>(() => instance.ExecuteBatch(new byte[64], new byte[63], 1));
+    Throws<ArgumentException>(() => instance.ExecuteBatch(new byte[63], new byte[64], 1));
+    Throws<ArgumentOutOfRangeException>(() => instance.ExecuteBatch([], [], 33));
+    Throws<ArgumentOutOfRangeException>(() => instance.ExecuteBatch([], [], -1));
+    var overlap = new byte[64];
+    Throws<ArgumentException>(() => instance.ExecuteBatch(overlap, overlap, 1));
+    Throws<ArgumentException>(() => instance.ExecuteBatch(instance.State.Register(0).Bytes, new byte[64], 1));
+    var huge = program.Instantiate(new VmOptions { MemorySize = 0, Fuel = ulong.MaxValue });
+    Throws<ArgumentException>(() => huge.ExecuteBatch([], new byte[128], 0));
+    Equal(42UL, instance.State.Register(0).ReadUInt64(0));
+    Equal(instance.State.InitialFuel, instance.State.FuelRemaining);
+    var empty = instance.ExecuteBatch([], [], 0);
+    Equal(0, empty.CompletedCount);
+    Equal(0UL, empty.FuelConsumed);
+    var outputs = new byte[128];
+    var constants = instance.ExecuteBatch([], outputs, 0);
+    True(constants.Succeeded, "Zero-argument batch failed.");
+    Equal(42UL, BinaryPrimitives.ReadUInt64LittleEndian(outputs.AsSpan(64)));
+}
+
+static void BatchStateAndImports()
+{
+    var import = new ImportDefinition("test", "batch", 1, 4);
+    var calls = 0;
+    HostImportHandler handler = _ => { calls++; return HostCallStatus.Success; };
+    var options = new VmOptions
+    {
+        MemorySize = 64,
+        Fuel = 11,
+        ImportBindings = new Dictionary<ImportKey, HostImportHandler> { [new("test", "batch", 1)] = handler },
+    };
+    var program = CascadeProgram.FromModule(new CascadeModule([
+        new(Opcode.Zero, Destination: 1),
+        new(Opcode.Load, Destination: 0, SourceA: 1),
+        new(Opcode.SplatI64, Destination: 2, Immediate: 1),
+        new(Opcode.AddI64, Destination: 0, SourceA: 0, SourceB: 2),
+        new(Opcode.Store, SourceA: 1, SourceB: 0),
+        new(Opcode.HostCall, Immediate: 0),
+        new(Opcode.Halt),
+    ], imports: [import]));
+    var outputs = new byte[3 * 64];
+    var instance = program.Instantiate(options);
+    var result = instance.ExecuteBatch([], outputs, 0);
+    True(result.Succeeded, "Stateful batch failed.");
+    Equal(3, calls);
+    Equal(33UL, result.FuelConsumed);
+    for (var item = 0; item < 3; item++)
+        Equal((ulong)(item + 1), BinaryPrimitives.ReadUInt64LittleEndian(outputs.AsSpan(item * 64)));
+    Equal(3UL, BinaryPrimitives.ReadUInt64LittleEndian(instance.State.LinearMemory.Span));
+    Throws<ArgumentException>(() => instance.ExecuteBatch(instance.State.LinearMemory.Span, new byte[64], 1));
 }
 
 static int WriteGoldenFixtures(string directory)

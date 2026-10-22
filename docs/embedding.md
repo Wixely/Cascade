@@ -45,6 +45,51 @@ can retain kernel data or overwrite only its inputs. Import bindings and limits
 also remain attached to the instance. Create a new instance when completely
 zero-initialized data state is required.
 
+## Packed kernel batches
+
+`ExecuteBatch` accepts consecutive input register sets and a 64-byte output
+slot per invocation. Inputs and outputs use the same little-endian lane encoding
+as architectural registers:
+
+```csharp
+// For each invocation, inputs contain v0, v1, ... in declaration order.
+var inputs = new byte[invocations * argumentCount * 64];
+var outputs = new byte[invocations * 64];
+// Fill inputs before calling.
+var result = instance.ExecuteBatch(inputs, outputs, argumentCount);
+Console.WriteLine($"Completed {result.CompletedCount}; fuel {result.FuelConsumed}");
+```
+
+The count comes from the output length. Zero arguments and an empty batch are
+supported. Each invocation restarts control state and receives the original
+per-invocation fuel allowance. Memory and non-input vector registers persist,
+and imports retain their ordinary capability bindings and fuel surcharges.
+The instance must not be used concurrently or reentrantly by host callbacks.
+
+On a trap, completed outputs remain available; the failing output and all later
+slots remain untouched. `CompletedCount` is then the failing invocation's
+zero-based index. `FuelConsumed` includes the failing invocation. Memory effects
+from instructions before a trap remain visible, as with individual execution.
+This is sequential execution, not an atomic transaction across the whole batch.
+
+All buffer sizes and aliasing are checked before execution. Buffers must not
+overlap each other or instance registers/memory. Batches whose maximum aggregate
+fuel (`count * instance.State.InitialFuel`) cannot fit in `ulong` are rejected.
+An empty batch preserves existing instance state. Callers can split large work
+into batches to control overall host workload and cancellation granularity.
+
+Measure creation, manual restart, and batching with:
+
+```powershell
+dotnet run --project tools/Cascade.Benchmarks -c Release -- --batch
+```
+
+The benchmark validates every output against scalar arithmetic, reports median
+time and allocations. Packed batches use an internal value-type execution result
+and allocate one public batch result on successful completion. Individual
+`Execute` calls retain their existing `ExecutionResult` contract. Batching does
+not fuse instructions or eliminate interpreter dispatch.
+
 ## Execution backends
 
 Reference execution remains the default and defines Cascade semantics. Select

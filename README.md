@@ -9,7 +9,7 @@ memory, and a correctness-first reference interpreter.
 - Phase: Complete v0.1 MVP
 - Implementation: C# on .NET 10
 - Backends: Hardware-independent reference interpreter and portable hardware SIMD
-- Source compiler: Typed `.cascade` language version 0.3 to portable `CVM1` bytecode
+- Source compiler: Typed `.cascade` language version 0.3 with value-numbered IR optimization to portable `CVM1` bytecode
 - Module container: Sectioned `CVM1` version `1.0`
 - Verified platforms: Windows x64 and Linux x64, managed self-contained and NativeAOT
 - License: [MIT](LICENSE)
@@ -28,6 +28,7 @@ comparison, and selection instructions using the native width exposed by .NET.
 
 ```powershell
 dotnet build Cascade.sln
+eng\verify.ps1
 dotnet run --project tests\Cascade.Compiler.Tests
 dotnet run --project tests\Cascade.Runtime.Conformance
 dotnet run --project src\Cascade.Cli -- sample sample.cvm
@@ -36,6 +37,7 @@ dotnet run --project src\Cascade.Cli -- run sample.cvm
 dotnet run --project src\Cascade.Cli -- run sample.cvm --backend auto
 dotnet run --project examples\Cascade.Demos
 dotnet run --project examples\Cascade.GameOfLife
+dotnet run --project tools\Cascade.Benchmarks -c Release -- --batch
 ```
 
 The sample halts with every `v0.i64` lane set to `42`. The repository-local VS
@@ -67,6 +69,7 @@ eng\verify-linux.ps1 -RequireNativeAot
 - [Embedding API](docs/embedding.md)
 - [Kernel language and compiler](docs/language.md)
 - [Post-MVP engineering status](docs/post-mvp.md)
+- [Compiler and batch implementation review](docs/implementation-review.md)
 - [Implementation plan](docs/plan.md)
 - [Project preferences](docs/preferences.md)
 - [Decision records](docs/decisions/README.md)

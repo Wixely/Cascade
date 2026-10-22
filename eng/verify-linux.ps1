@@ -30,6 +30,10 @@ if ($null -ne $linuxPublishRoot) { $linuxPublishRoot = $linuxPublishRoot.Trim() 
 if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($linuxPublishRoot)) { throw 'Could not translate the Linux publish path.' }
 $repositoryPathForWsl = $repositoryRoot.Replace('\', '/')
 $linuxRepositoryRoot = (& wsl.exe @wslDistributionArgs -- wslpath -a $repositoryPathForWsl).Trim()
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($linuxRepositoryRoot)) { throw 'Could not translate the repository path.' }
+# Resolve directory links once so restore and project references share one identity.
+$linuxRepositoryRoot = (& wsl.exe @wslDistributionArgs -- readlink -f $linuxRepositoryRoot).Trim()
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($linuxRepositoryRoot)) { throw 'Could not resolve the Linux repository path.' }
 Invoke-Checked { wsl.exe @wslDistributionArgs -- ($linuxPublishRoot + '/conformance/Cascade.Runtime.Conformance') } 'Linux conformance execution'
 Invoke-Checked { wsl.exe @wslDistributionArgs -- ($linuxPublishRoot + '/differential/Cascade.Runtime.Differential') } 'Linux differential execution'
 Invoke-Checked { wsl.exe @wslDistributionArgs -- ($linuxPublishRoot + '/compiler-tests/Cascade.Compiler.Tests') } 'Linux compiler tests execution'
@@ -67,4 +71,10 @@ Invoke-Checked { wsl.exe @wslDistributionArgs -- ($linuxNativeOutput + '/cascade
 $linuxNativeDemoOutput = $linuxPublishRoot + '/native-aot-game-of-life'
 Invoke-Checked { wsl.exe @wslDistributionArgs -- dotnet publish ($linuxRepositoryRoot + '/examples/Cascade.GameOfLife/Cascade.GameOfLife.csproj') -c Release -r linux-x64 --self-contained true -p:PublishAot=true -o $linuxNativeDemoOutput } 'Linux SIMD demo NativeAOT publish'
 Invoke-Checked { wsl.exe @wslDistributionArgs -- ($linuxNativeDemoOutput + '/Cascade.GameOfLife') --benchmark } 'Linux SIMD demo NativeAOT execution'
+foreach ($testProject in @('Cascade.Compiler.Tests', 'Cascade.Runtime.Conformance')) {
+    $nativeTestOutput = $linuxPublishRoot + '/native-aot-' + $testProject
+    $nativeTestProject = $linuxRepositoryRoot + '/tests/' + $testProject + '/' + $testProject + '.csproj'
+    Invoke-Checked { wsl.exe @wslDistributionArgs -- dotnet publish $nativeTestProject -c Release -r linux-x64 --self-contained true -p:PublishAot=true -o $nativeTestOutput } 'Linux NativeAOT test publish'
+    Invoke-Checked { wsl.exe @wslDistributionArgs -- ($nativeTestOutput + '/' + $testProject) } 'Linux NativeAOT test execution'
+}
 Write-Output 'Managed and NativeAOT Linux verification passed.'

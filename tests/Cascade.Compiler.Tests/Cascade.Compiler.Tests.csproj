@@ -3,6 +3,7 @@
     <OutputType>Exe</OutputType>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="..\..\src\Cascade.Core\Cascade.Core.csproj" />
     <ProjectReference Include="..\..\src\Cascade.Compiler\Cascade.Compiler.csproj" />
     <ProjectReference Include="..\..\src\Cascade.Runtime\Cascade.Runtime.csproj" />
   </ItemGroup>

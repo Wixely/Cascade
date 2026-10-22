@@ -15,6 +15,7 @@ internal interface IVmInterpreter
 {
     VmState State { get; }
     ExecutionResult Execute();
+    ExecutionOutcome ExecuteCore();
     void Restart();
 }
 
@@ -41,5 +42,14 @@ public sealed class SimdInterpreter : IVmInterpreter
     public static int VectorWidthBits => IsSupported ? Vector<byte>.Count * 8 : 0;
     public VmState State => _interpreter.State;
     public ExecutionResult Execute() => _interpreter.Execute();
+    ExecutionOutcome IVmInterpreter.ExecuteCore() => _interpreter.ExecuteCore();
     public void Restart() => _interpreter.Restart();
+}
+
+// Keeps the batch hot path allocation-free for successful invocations while
+// preserving the public reference-type ExecutionResult API.
+internal readonly record struct ExecutionOutcome(bool Halted, ulong FuelConsumed, VmTrap? Trap)
+{
+    public bool Succeeded => Halted && Trap is null;
+    public ExecutionResult ToResult() => new(Halted, FuelConsumed, Trap);
 }

@@ -42,4 +42,4 @@ write order remain runtime semantics defined by the reference interpreter.
 - [x] Test every mask constructor and Boolean combinator — Owner: Codex — Completed: 2026-10-22
 - [x] Add a runnable 0.3 sparse-memory source demo — Owner: Codex — Completed: 2026-10-22
 - [x] Add local liveness-aware release, conservative dead-binding removal, and mask identities — Owner: Codex — Completed: 2026-10-22
-- [ ] Add a typed compiler IR for global value propagation and broader dead-code elimination — Owner: TBD — Due: TBD
+- [x] Add a typed compiler IR for global value propagation and broader dead-code elimination — Owner: Codex — Completed: 2026-10-22

@@ -43,4 +43,4 @@ compiler IR.
 ## Follow-up
 
 - [x] Add regression coverage for register reuse and local simplification — Owner: Codex — Completed: 2026-10-22
-- [ ] Introduce a typed compiler IR and measure it against the demo and benchmark corpus — Owner: TBD — Due: TBD
+- [x] Introduce a typed compiler IR and measure it against the demos — Owner: Codex — Completed: 2026-10-22

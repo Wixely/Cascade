@@ -2,7 +2,7 @@
 
 - Language version: 0.3
 - File extension: `.cascade`
-- Compiler command: `cascade compile <input.cascade> [-o <output.cvm>]`
+- Compiler command: `cascade compile <input.cascade> [-o <output.cvm>] [--no-optimize]`
 
 Cascade kernel source is a small, statically typed language that compiles
 deterministically to portable `CVM1` bytecode. It expresses the data-parallel
@@ -145,17 +145,38 @@ vectors and reconstructs a correctly sized predicate mask. The compiler folds
 neutral mask operands, double negation, and identical-mask Boolean operations
 before using that general lowering.
 
-## Compiler optimizations
+## Compiler IR and optimizations
+
+After semantic validation, the compiler builds a typed, value-numbered
+expression graph. It propagates immutable aliases and mask facts across `let`
+bindings, folds Boolean identities and known `select` conditions, reuses saved
+pure common expressions, and removes transitively dead pure bindings. Mutable
+values are invalidated across assignments and loop boundaries. The optimized
+graph is validated again before CVM1 lowering.
 
 The compiler releases immutable binding storage after its final source use, so
 long expression chains reuse architectural registers instead of retaining every
-intermediate. It removes unused `let` expressions only when they are known not
-to trap or have effects. Loads, gathers, and helper calls are retained
-conservatively even when their values are unused.
+intermediate. Loads, gathers, helper calls, and unselected `select` operands are
+retained whenever removing them could erase an eagerly evaluated trap or effect.
 
-These are deterministic local lowering optimizations. Cascade does not yet have
-a general typed intermediate representation, global value propagation, register
-spilling, or broad dead-code elimination.
+Successful compilation reports instruction count and peak allocated vector and
+mask registers through `CompilationResult.Metrics`. The CLI and source demos
+display the same measurements. Common-expression reuse currently requires an
+available immutable binding in the lexical scope; it does not move loads or
+helper calls. Register spilling and instruction scheduling remain unimplemented.
+
+`CompilationOptions.Optimize = false` or CLI `--no-optimize` bypasses the typed
+IR transformations for diagnosis and differential testing. Deterministic local
+lowering and register allocation still apply. Optimizations can change bytecode,
+scratch registers, instruction indices, and fuel consumption. The source contract
+is the returned vector, ordered memory effects and traps with sufficient fuel;
+complete VM-state equivalence applies to backends executing identical bytecode.
+
+Compiler inputs are bounded to 1,000,000 characters, source/expression nesting
+of 128, and 1,000,000 expanded statement/iteration visits in addition to the
+bytecode instruction limit. Excessive inputs produce source diagnostics rather
+than unbounded repeat expansion. The CLI refuses to overwrite its source file
+and replaces output only after successful compilation and serialization.
 
 ## Grammar
 
@@ -189,5 +210,5 @@ line. Diagnostics include a stable code plus one-based line and column.
 
 Language version 0.3 intentionally has no data-dependent branches, dynamic
 loops, imports, casts, mask parameters, or mask returns. The compiler performs
-deterministic local optimization and temporary-register allocation but does not
-spill.
+deterministic typed-IR optimization and temporary-register allocation but does
+not spill.

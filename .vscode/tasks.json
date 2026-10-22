@@ -2,6 +2,14 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "verify managed",
+      "type": "process",
+      "command": "powershell.exe",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/eng/verify.ps1"],
+      "problemMatcher": "$msCompile",
+      "group": "test"
+    },
+    {
       "label": "build",
       "type": "process",
       "command": "dotnet",

@@ -7,8 +7,19 @@ public sealed record CascadeDiagnostic(string Code, string Message, int Line, in
     public override string ToString() => $"{Line}:{Column}: {Code}: {Message}";
 }
 
-public sealed record CompilationResult(CascadeModule? Module, IReadOnlyList<CascadeDiagnostic> Diagnostics)
+public sealed record CompilationMetrics(int InstructionCount, int PeakVectorRegisters, int PeakMaskRegisters);
+
+public sealed record CompilationOptions
 {
+    /// <summary>Apply typed value propagation and dead-binding elimination before lowering.</summary>
+    public bool Optimize { get; init; } = true;
+}
+
+public sealed record CompilationResult(
+    CascadeModule? Module,
+    IReadOnlyList<CascadeDiagnostic> Diagnostics)
+{
+    public CompilationMetrics? Metrics { get; init; }
     public bool Succeeded => Module is not null && Diagnostics.Count == 0;
 }
 
@@ -16,13 +27,20 @@ public static class CascadeCompiler
 {
     public const string LanguageVersion = "0.3";
 
-    public static CompilationResult Compile(string source)
+    public static CompilationResult Compile(string source) => Compile(source, new CompilationOptions());
+
+    public static CompilationResult Compile(string source, CompilationOptions options)
     {
         ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(options);
+        if (source.Length > 1_000_000)
+            return new(null, [new("CAS007", "Source may contain at most 1,000,000 characters.", 1, 1)]);
         try
         {
             var program = new Parser(new Lexer(source).Lex()).ParseProgram();
-            return new(new Lowerer(program).Compile(), []);
+            var lowerer = new Lowerer(program, options.Optimize);
+            var module = lowerer.Compile();
+            return new(module, []) { Metrics = new(module.Instructions.Count, lowerer.PeakVectorRegisters, lowerer.PeakMaskRegisters) };
         }
         catch (CompilationFailure failure)
         {
@@ -181,13 +199,19 @@ internal sealed record ScatterStatementSyntax(string Name, IReadOnlyList<Express
 internal sealed record ReturnStatementSyntax(ExpressionSyntax Expression, Token Token) : StatementSyntax(Token);
 internal abstract record ExpressionSyntax(Token Token);
 internal sealed record NameExpressionSyntax(string Name, Token Token) : ExpressionSyntax(Token);
-internal sealed record LiteralExpressionSyntax(ulong Value, bool Negative, Token Token) : ExpressionSyntax(Token);
+internal sealed record LiteralExpressionSyntax(ulong Value, bool Negative, Token Token) : ExpressionSyntax(Token)
+{
+    // Internal IR annotation; source literals still require a vector context.
+    public SourceType? ResolvedType { get; init; }
+}
 internal sealed record BinaryExpressionSyntax(ExpressionSyntax Left, Token Operator, ExpressionSyntax Right) : ExpressionSyntax(Operator);
 internal sealed record CallExpressionSyntax(string Name, IReadOnlyList<ExpressionSyntax> Arguments, Token Token) : ExpressionSyntax(Token);
 
 internal sealed class Parser(IReadOnlyList<Token> tokens)
 {
     private int _position;
+    private int _nesting;
+    private readonly Dictionary<ExpressionSyntax, int> _expressionDepths = new(ReferenceEqualityComparer.Instance);
 
     public ProgramSyntax ParseProgram()
     {
@@ -236,6 +260,13 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
     }
 
     private IReadOnlyList<StatementSyntax> ParseBlock()
+    {
+        EnterNesting();
+        try { return ParseBlockCore(); }
+        finally { _nesting--; }
+    }
+
+    private IReadOnlyList<StatementSyntax> ParseBlockCore()
     {
         Expect(TokenKind.LeftBrace, "Expected '{' before the kernel body.");
         var statements = new List<StatementSyntax>();
@@ -339,6 +370,13 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
 
     private ExpressionSyntax ParseExpression(int parentPrecedence = 0)
     {
+        EnterNesting();
+        try { return ParseExpressionCore(parentPrecedence); }
+        finally { _nesting--; }
+    }
+
+    private ExpressionSyntax ParseExpressionCore(int parentPrecedence)
+    {
         ExpressionSyntax left;
         if (Match(TokenKind.Minus, out var minus))
         {
@@ -356,7 +394,9 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
             if (precedence == 0 || precedence <= parentPrecedence) break;
             var op = Advance();
             var right = ParseExpression(precedence);
+            var depth = 1 + Math.Max(ExpressionDepth(left), ExpressionDepth(right));
             left = new BinaryExpressionSyntax(left, op, right);
+            RecordDepth(left, depth);
         }
 
         return left;
@@ -387,7 +427,9 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
                 while (Match(TokenKind.Comma));
             }
             Expect(TokenKind.RightParenthesis, "Expected ')' after call arguments.");
-            return new CallExpressionSyntax(name.Text, arguments, name);
+            var call = new CallExpressionSyntax(name.Text, arguments, name);
+            RecordDepth(call, 1 + (arguments.Count == 0 ? 0 : arguments.Max(ExpressionDepth)));
+            return call;
         }
 
         return new NameExpressionSyntax(name.Text, name);
@@ -403,6 +445,19 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
         TokenKind.Star => 6,
         _ => 0,
     };
+
+    private int ExpressionDepth(ExpressionSyntax expression) => _expressionDepths.GetValueOrDefault(expression, 1);
+
+    private void RecordDepth(ExpressionSyntax expression, int depth)
+    {
+        if (depth > 128) throw Error("CAS006", "Expression depth may not exceed 128.", expression.Token);
+        _expressionDepths[expression] = depth;
+    }
+
+    private void EnterNesting()
+    {
+        if (++_nesting > 128) throw Error("CAS006", "Source nesting may not exceed 128.", Current);
+    }
 
     private static ulong ParseNumber(Token token) => ulong.TryParse(token.Text, out var value)
         ? value
@@ -442,28 +497,48 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
 internal sealed class Lowerer
 {
     private const int MaximumInstructions = 1_000_000;
-    private readonly ProgramSyntax _program;
+    private ProgramSyntax _program;
     private readonly Dictionary<string, FunctionSyntax> _functions = new(StringComparer.Ordinal);
     private readonly Dictionary<ExpressionSyntax, SourceType> _expressionTypes = new();
     private readonly HashSet<string> _activeCalls = new(StringComparer.Ordinal);
     private readonly bool[] _registers = new bool[32];
     private readonly bool[] _masks = new bool[8];
     private readonly List<Instruction> _instructions = [];
+    private readonly bool _optimize;
+    private int _expandedWork;
+    private int _emissionDepth;
+    private readonly SourceLiveness _liveness = new();
 
-    public Lowerer(ProgramSyntax program) => _program = program;
+    public int PeakVectorRegisters { get; private set; }
+    public int PeakMaskRegisters { get; private set; }
+
+    public Lowerer(ProgramSyntax program, bool optimize)
+    {
+        _program = program;
+        _optimize = optimize;
+    }
 
     public CascadeModule Compile()
     {
         CheckSemantics();
+        if (_optimize)
+        {
+            _program = new TypedIrOptimizer(_program, _expressionTypes).Optimize();
+            _functions.Clear();
+            _expressionTypes.Clear();
+            CheckSemantics();
+        }
         var scope = new ValueScope(null);
+        _liveness.Analyze(_program.Kernel.Statements);
         for (var index = 0; index < _program.Kernel.Parameters.Count; index++)
         {
             _registers[index] = true;
             var parameter = _program.Kernel.Parameters[index];
             scope.Define(parameter.Name,
                 new(new(parameter.Type, (byte)index, false), mutable: false, ownsStorage: false,
-                    remainingUses: CountUses(parameter.Name, _program.Kernel.Statements)));
+                    remainingUses: _liveness.UsesOf(parameter.Name, _program.Kernel.Statements)));
         }
+        TrackRegisterPressure();
 
         var result = EmitStatements(_program.Kernel.Statements, scope);
         if (result.Index != 0)
@@ -494,8 +569,9 @@ internal sealed class Lowerer
         var states = new Dictionary<string, byte>(StringComparer.Ordinal);
         foreach (var function in _program.Functions) Visit(function);
 
-        void Visit(FunctionSyntax function)
+        void Visit(FunctionSyntax function, int depth = 0)
         {
+            if (depth > 128) throw Error("CAS204", "Function nesting may not exceed 128.", function.Token);
             if (states.TryGetValue(function.Name, out var state) && state == 2) return;
             states[function.Name] = 1;
             foreach (var call in CallsIn(function.Statements))
@@ -503,7 +579,7 @@ internal sealed class Lowerer
                 if (!_functions.TryGetValue(call.Name, out var target)) continue;
                 if (states.TryGetValue(target.Name, out state) && state == 1)
                     throw Error("CAS125", $"Recursive call to '{target.Name}' is not allowed.", call.Token);
-                Visit(target);
+                Visit(target, depth + 1);
             }
             states[function.Name] = 2;
         }
@@ -634,6 +710,7 @@ internal sealed class Lowerer
                 type = symbol.Type;
                 break;
             case LiteralExpressionSyntax literal:
+                expected = literal.ResolvedType ?? expected;
                 if (expected is not SourceType.VectorI32 and not SourceType.VectorI64)
                     throw Error("CAS106", "An integer literal needs a vector context.", literal.Token);
                 CheckLiteral(literal, expected.Value);
@@ -749,15 +826,19 @@ internal sealed class Lowerer
         return binary.Operator.Kind is TokenKind.EqualEqual or TokenKind.Less ? MaskType(leftType) : leftType;
     }
 
-    private Value EmitStatements(IReadOnlyList<StatementSyntax> statements, ValueScope scope)
+    private Value EmitStatements(IReadOnlyList<StatementSyntax> statements, ValueScope scope) =>
+        EmitBlock(statements, scope) ?? throw new InvalidOperationException("Semantics require a return statement.");
+
+    private Value? EmitBlock(IReadOnlyList<StatementSyntax> statements, ValueScope scope)
     {
         for (var statementIndex = 0; statementIndex < statements.Count; statementIndex++)
         {
             var statement = statements[statementIndex];
+            ChargeExpansion(statement.Token);
             switch (statement)
             {
                 case LetStatementSyntax let:
-                    var remainingUses = CountUses(let.Name, statements, statementIndex + 1);
+                    var remainingUses = _liveness.UsesOf(let);
                     if (remainingUses == 0 && IsPure(let.Expression)) break;
                     var local = Emit(let.Expression, scope);
                     if (remainingUses == 0)
@@ -765,14 +846,21 @@ internal sealed class Lowerer
                         Release(local);
                         break;
                     }
+                    if (!local.Owned)
+                    {
+                        var snapshot = Copy(local, let.Token);
+                        Release(local);
+                        local = snapshot;
+                    }
                     scope.Define(let.Name, new(local with { Owned = false }, mutable: false,
                         ownsStorage: local.Owned, remainingUses));
                     break;
                 case VarStatementSyntax variable:
                     var initial = Emit(variable.Expression, scope);
                     var storage = initial.Owned ? initial : Copy(initial, variable.Token);
+                    if (!initial.Owned) Release(initial);
                     scope.Define(variable.Name, new(storage with { Owned = false }, mutable: true,
-                        ownsStorage: true, remainingUses: CountUses(variable.Name, statements, statementIndex + 1)));
+                        ownsStorage: true, remainingUses: _liveness.UsesOf(variable)));
                     break;
                 case AssignmentStatementSyntax assignment:
                     var target = scope.Get(assignment.Name);
@@ -784,8 +872,9 @@ internal sealed class Lowerer
                 case RepeatStatementSyntax repeat:
                     for (var iteration = 0; iteration < repeat.Count; iteration++)
                     {
+                        ChargeExpansion(repeat.Token);
                         var child = new ValueScope(scope);
-                        _ = EmitStatementsWithoutReturn(repeat.Statements, child);
+                        _ = EmitBlock(repeat.Statements, child);
                         Dispose(child);
                     }
                     break;
@@ -803,66 +892,18 @@ internal sealed class Lowerer
                     return Emit(@return.Expression, scope);
             }
         }
-        throw new InvalidOperationException("Semantics require a return statement.");
+        return null;
     }
 
-    private bool EmitStatementsWithoutReturn(IReadOnlyList<StatementSyntax> statements, ValueScope scope)
+    private Value Emit(ExpressionSyntax expression, ValueScope scope)
     {
-        for (var statementIndex = 0; statementIndex < statements.Count; statementIndex++)
-        {
-            var statement = statements[statementIndex];
-            if (statement is ReturnStatementSyntax) throw new InvalidOperationException();
-            switch (statement)
-            {
-                case LetStatementSyntax let:
-                    var remainingUses = CountUses(let.Name, statements, statementIndex + 1);
-                    if (remainingUses == 0 && IsPure(let.Expression)) break;
-                    var local = Emit(let.Expression, scope);
-                    if (remainingUses == 0)
-                    {
-                        Release(local);
-                        break;
-                    }
-                    scope.Define(let.Name, new(local with { Owned = false }, mutable: false,
-                        ownsStorage: local.Owned, remainingUses));
-                    break;
-                case VarStatementSyntax variable:
-                    var initial = Emit(variable.Expression, scope);
-                    var storage = initial.Owned ? initial : Copy(initial, variable.Token);
-                    scope.Define(variable.Name, new(storage with { Owned = false }, mutable: true,
-                        ownsStorage: true, remainingUses: CountUses(variable.Name, statements, statementIndex + 1)));
-                    break;
-                case AssignmentStatementSyntax assignment:
-                    var target = scope.Get(assignment.Name);
-                    var assigned = Emit(assignment.Expression, scope);
-                    if (assigned.Index != target.Value.Index)
-                        Add(new(Opcode.Move, Destination: target.Value.Index, SourceA: assigned.Index), assignment.Token);
-                    Release(assigned);
-                    break;
-                case RepeatStatementSyntax repeat:
-                    for (var iteration = 0; iteration < repeat.Count; iteration++)
-                    {
-                        var child = new ValueScope(scope);
-                        EmitStatementsWithoutReturn(repeat.Statements, child);
-                        Dispose(child);
-                    }
-                    break;
-                case StoreStatementSyntax store:
-                    var address = Emit(store.Address, scope);
-                    var value = Emit(store.Value, scope);
-                    Add(new(Opcode.Store, SourceA: address.Index, SourceB: value.Index), store.Token);
-                    Release(address);
-                    Release(value);
-                    break;
-                case ScatterStatementSyntax scatter:
-                    EmitScatter(scatter, scope);
-                    break;
-            }
-        }
-        return false;
+        if (++_emissionDepth > 128)
+            throw Error("CAS204", "Expanded expression nesting may not exceed 128.", expression.Token);
+        try { return EmitCore(expression, scope); }
+        finally { _emissionDepth--; }
     }
 
-    private Value Emit(ExpressionSyntax expression, ValueScope scope) => expression switch
+    private Value EmitCore(ExpressionSyntax expression, ValueScope scope) => expression switch
     {
         NameExpressionSyntax name => scope.Take(name.Name),
         LiteralExpressionSyntax literal => EmitLiteral(literal),
@@ -895,8 +936,8 @@ internal sealed class Lowerer
         }
         var destination = left.Owned ? left.Index : right.Owned ? right.Index : AllocateRegister(binary.Token);
         Add(new(VectorOpcode(binary.Operator.Kind, type), Destination: destination, SourceA: left.Index, SourceB: right.Index), binary.Token);
-        if (left.Owned && left.Index != destination) Release(left);
-        if (right.Owned && right.Index != destination) Release(right);
+        if (!left.Owned || left.Index != destination) Release(left);
+        if (!right.Owned || right.Index != destination) Release(right);
         return new(type, destination, true);
     }
 
@@ -913,21 +954,24 @@ internal sealed class Lowerer
             return new(_expressionTypes[call], destination, true);
         }
         if (call.Name is "gather_i32" or "gather_i64") return EmitGather(call, scope);
-        if (call.Name.StartsWith("mask_all_", StringComparison.Ordinal)) return EmitMaskConstant(call, all: true);
-        if (call.Name.StartsWith("mask_none_", StringComparison.Ordinal)) return EmitMaskConstant(call, all: false);
+        if (call.Name is "mask_all_i32" or "mask_all_i64") return EmitMaskConstant(call, all: true);
+        if (call.Name is "mask_none_i32" or "mask_none_i64") return EmitMaskConstant(call, all: false);
         if (call.Name == "mask_not") return EmitMaskNot(call, scope);
         if (call.Name is "mask_and" or "mask_or" or "mask_xor") return EmitMaskBinary(call, scope);
 
         var function = _functions[call.Name];
+        if (_activeCalls.Count >= 128)
+            throw Error("CAS204", "Function expansion nesting may not exceed 128.", call.Token);
         if (!_activeCalls.Add(function.Name))
             throw Error("CAS125", $"Recursive call to '{function.Name}' is not allowed.", call.Token);
         var arguments = call.Arguments.Select(argument => Emit(argument, scope)).ToArray();
         var functionScope = new ValueScope(null);
+        _liveness.Analyze(function.Statements);
         for (var index = 0; index < arguments.Length; index++)
         {
             var parameter = function.Parameters[index];
             functionScope.Define(parameter.Name, new(arguments[index] with { Owned = false }, mutable: false,
-                ownsStorage: false, remainingUses: CountUses(parameter.Name, function.Statements)));
+                ownsStorage: false, remainingUses: _liveness.UsesOf(parameter.Name, function.Statements)));
         }
         var returned = EmitStatements(function.Statements, functionScope);
         var copy = Copy(returned, call.Token);
@@ -1028,7 +1072,11 @@ internal sealed class Lowerer
         if (leftMask.Index == rightMask.Index)
         {
             if (call.Name is "mask_and" or "mask_or")
-                return leftMask.Owned ? leftMask : rightMask;
+            {
+                if (leftMask.Owned) { Release(rightMask); return leftMask; }
+                Release(leftMask);
+                return rightMask;
+            }
             Release(leftMask);
             Release(rightMask);
             return EmitMaskConstant(_expressionTypes[call], call.Token, all: false);
@@ -1087,13 +1135,20 @@ internal sealed class Lowerer
         Add(new(type == SourceType.VectorI32 ? Opcode.SelectI32 : Opcode.SelectI64,
             Destination: destination, SourceA: whenTrue.Index, SourceB: whenFalse.Index, Mask: condition.Index), call.Token);
         Release(condition);
-        if (whenTrue.Owned && whenTrue.Index != destination) Release(whenTrue);
-        if (whenFalse.Owned && whenFalse.Index != destination) Release(whenFalse);
+        if (!whenTrue.Owned || whenTrue.Index != destination) Release(whenTrue);
+        if (!whenFalse.Owned || whenFalse.Index != destination) Release(whenFalse);
         return new(type, destination, true);
     }
 
     private Value Copy(Value source, Token token)
     {
+        if (IsMask(source.Type))
+        {
+            var mask = AllocateMask(token);
+            Add(new(source.Type == SourceType.MaskI32 ? Opcode.ConvertMask16 : Opcode.ConvertMask8,
+                Destination: mask, Mask: source.Index), token);
+            return new(source.Type, mask, true);
+        }
         var destination = AllocateRegister(token);
         Add(new(Opcode.Move, Destination: destination, SourceA: source.Index), token);
         return new(source.Type, destination, true);
@@ -1124,60 +1179,17 @@ internal sealed class Lowerer
     }
 
     private static bool IsMaskConstant(ExpressionSyntax expression, string prefix) =>
-        expression is CallExpressionSyntax call && call.Name.StartsWith(prefix, StringComparison.Ordinal);
+        expression is CallExpressionSyntax call && (call.Name == prefix + "i32" || call.Name == prefix + "i64");
 
     private static bool IsPure(ExpressionSyntax expression) => expression switch
     {
         NameExpressionSyntax or LiteralExpressionSyntax => true,
         BinaryExpressionSyntax binary => IsPure(binary.Left) && IsPure(binary.Right),
         CallExpressionSyntax call when call.Name is "select" or "mask_not" or "mask_and" or "mask_or" or "mask_xor" ||
-                                       call.Name.StartsWith("mask_all_", StringComparison.Ordinal) ||
-                                       call.Name.StartsWith("mask_none_", StringComparison.Ordinal) => call.Arguments.All(IsPure),
+                                       call.Name is "mask_all_i32" or "mask_all_i64" or "mask_none_i32" or "mask_none_i64" => call.Arguments.All(IsPure),
         _ => false,
     };
 
-    private static int CountUses(string name, IReadOnlyList<StatementSyntax> statements, int startIndex = 0)
-    {
-        var count = 0;
-        for (var index = startIndex; index < statements.Count; index++)
-        {
-            var statement = statements[index];
-            count = SaturatingAdd(count, statement switch
-            {
-                LetStatementSyntax let => CountUses(name, let.Expression),
-                VarStatementSyntax variable => CountUses(name, variable.Expression),
-                AssignmentStatementSyntax assignment => CountUses(name, assignment.Expression),
-                RepeatStatementSyntax repeat => SaturatingMultiply(repeat.Count, CountUses(name, repeat.Statements)),
-                StoreStatementSyntax store => SaturatingAdd(CountUses(name, store.Address), CountUses(name, store.Value)),
-                ScatterStatementSyntax scatter => CountUses(name, scatter.Arguments),
-                ReturnStatementSyntax @return => CountUses(name, @return.Expression),
-                _ => 0,
-            });
-        }
-        return count;
-    }
-
-    private static int CountUses(string name, ExpressionSyntax expression) => expression switch
-    {
-        NameExpressionSyntax candidate => candidate.Name == name ? 1 : 0,
-        BinaryExpressionSyntax binary => SaturatingAdd(CountUses(name, binary.Left), CountUses(name, binary.Right)),
-        CallExpressionSyntax call => CountUses(name, call.Arguments),
-        _ => 0,
-    };
-
-    private static int CountUses(string name, IReadOnlyList<ExpressionSyntax> expressions)
-    {
-        var count = 0;
-        foreach (var expression in expressions)
-            count = SaturatingAdd(count, CountUses(name, expression));
-        return count;
-    }
-
-    private static int SaturatingAdd(int left, int right) =>
-        left > int.MaxValue - right ? int.MaxValue : left + right;
-
-    private static int SaturatingMultiply(int left, int right) =>
-        left != 0 && right > int.MaxValue / left ? int.MaxValue : left * right;
 
     private void Dispose(ValueScope scope)
     {
@@ -1192,12 +1204,19 @@ internal sealed class Lowerer
         _instructions.Add(instruction);
     }
 
+    private void ChargeExpansion(Token token)
+    {
+        if (++_expandedWork > MaximumInstructions)
+            throw Error("CAS204", "Compiler expansion exceeds 1,000,000 statement/iteration visits.", token);
+    }
+
     private byte AllocateRegister(Token token)
     {
         for (byte index = 0; index < _registers.Length; index++)
         {
             if (_registers[index]) continue;
             _registers[index] = true;
+            TrackRegisterPressure();
             return index;
         }
 
@@ -1211,6 +1230,7 @@ internal sealed class Lowerer
             if (_registers[index] || _registers[index + 1]) continue;
             _registers[index] = true;
             _registers[index + 1] = true;
+            TrackRegisterPressure();
             return (byte)index;
         }
         throw Error("CAS203", "i32 gather/scatter requires a free even-aligned register pair.", token);
@@ -1222,6 +1242,7 @@ internal sealed class Lowerer
         {
             if (_masks[index]) continue;
             _masks[index] = true;
+            TrackRegisterPressure();
             return index;
         }
 
@@ -1230,7 +1251,13 @@ internal sealed class Lowerer
 
     private void Release(Value value)
     {
-        if (!value.Owned) return;
+        if (!value.Owned)
+        {
+            if (value.BorrowedFrom is not { } binding) return;
+            binding.ActiveBorrows--;
+            if (binding.ActiveBorrows != 0 || binding.RemainingUses != 0 || binding.Mutable || !binding.OwnsStorage) return;
+            binding.OwnsStorage = false;
+        }
         if (IsMask(value.Type)) _masks[value.Index] = false;
         else _registers[value.Index] = false;
     }
@@ -1240,6 +1267,12 @@ internal sealed class Lowerer
         if (!pair.Owned) return;
         _registers[pair.Index] = false;
         _registers[pair.Index + 1] = false;
+    }
+
+    private void TrackRegisterPressure()
+    {
+        PeakVectorRegisters = Math.Max(PeakVectorRegisters, _registers.Count(allocated => allocated));
+        PeakMaskRegisters = Math.Max(PeakMaskRegisters, _masks.Count(allocated => allocated));
     }
 
     private static Opcode VectorOpcode(TokenKind op, SourceType type) => (op, type) switch
@@ -1304,7 +1337,7 @@ internal sealed class Lowerer
     }
 
     private static CompilationFailure Error(string code, string message, Token token) => new(new(code, message, token.Line, token.Column));
-    private readonly record struct Value(SourceType Type, byte Index, bool Owned);
+    private readonly record struct Value(SourceType Type, byte Index, bool Owned, ValueBinding? BorrowedFrom = null);
     private readonly record struct RegisterPair(byte Index, bool Owned);
     private readonly record struct TypeBinding(SourceType Type, bool Mutable);
     private sealed class ValueBinding(Value value, bool mutable, bool ownsStorage, int remainingUses)
@@ -1313,6 +1346,7 @@ internal sealed class Lowerer
         public bool Mutable { get; } = mutable;
         public bool OwnsStorage { get; set; } = ownsStorage;
         public int RemainingUses { get; set; } = remainingUses;
+        public int ActiveBorrows { get; set; }
     }
 
     private sealed class TypeScope(TypeScope? parent)
@@ -1345,12 +1379,13 @@ internal sealed class Lowerer
             if (binding.RemainingUses <= 0)
                 throw new InvalidOperationException($"Lowered symbol '{name}' has no remaining uses.");
             binding.RemainingUses--;
-            if (binding.RemainingUses == 0 && !binding.Mutable && binding.OwnsStorage)
+            if (binding.RemainingUses == 0 && binding.ActiveBorrows == 0 && !binding.Mutable && binding.OwnsStorage)
             {
                 binding.OwnsStorage = false;
-                return binding.Value with { Owned = true };
+                return binding.Value with { Owned = true, BorrowedFrom = null };
             }
-            return binding.Value with { Owned = false };
+            binding.ActiveBorrows++;
+            return binding.Value with { Owned = false, BorrowedFrom = binding };
         }
     }
 }

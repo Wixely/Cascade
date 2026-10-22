@@ -16,9 +16,11 @@ public static class ModuleValidator
             errors.Add(new(-1, $"Entry point {module.EntryPoint} is out of range."));
 
         uint previousFunctionEnd = 0;
+        var functionStarts = new HashSet<ulong>();
         for (var index = 0; index < module.Functions.Count; index++)
         {
             var function = module.Functions[index];
+            functionStarts.Add(function.Start);
             if (function.Start >= function.EndExclusive || function.EndExclusive > module.Instructions.Count)
                 errors.Add(new(-1, $"Function {index} has invalid range [{function.Start}, {function.EndExclusive})."));
             if (index != 0 && function.Start < previousFunctionEnd)
@@ -41,7 +43,7 @@ public static class ModuleValidator
         }
 
         for (var index = 0; index < module.Instructions.Count; index++)
-            ValidateInstruction(module.Instructions[index], index, module, errors);
+            ValidateInstruction(module.Instructions[index], index, module, functionStarts, errors);
 
         return errors;
     }
@@ -50,7 +52,7 @@ public static class ModuleValidator
         !string.IsNullOrEmpty(value) && value.Length <= 255 && value.All(character =>
             char.IsAsciiLetterOrDigit(character) || character is '.' or '_' or '-');
 
-    private static void ValidateInstruction(Instruction instruction, int index, CascadeModule module, List<ValidationError> errors)
+    private static void ValidateInstruction(Instruction instruction, int index, CascadeModule module, HashSet<ulong> functionStarts, List<ValidationError> errors)
     {
         if (!Enum.IsDefined(instruction.Opcode))
         {
@@ -175,7 +177,7 @@ public static class ModuleValidator
             case Opcode.Call:
                 Target();
                 if (instruction.Opcode == Opcode.Call && module.Functions.Count != 0 &&
-                    !module.Functions.Any(function => function.Start == instruction.Immediate))
+                    !functionStarts.Contains(instruction.Immediate))
                     errors.Add(new(index, $"Call target {instruction.Immediate} is not a declared function entry."));
                 Unused(instruction.Destination == 0 && instruction.SourceA == 0 && instruction.SourceB == 0 && instruction.Mask == 0, "register and mask");
                 break;

@@ -6,8 +6,7 @@ return args switch
 {
     ["run", var path] => Run(path, ExecutionBackend.Reference),
     ["run", var path, "--backend", var backend] => ParseBackend(path, backend),
-    ["compile", var sourcePath] => Compile(sourcePath, Path.ChangeExtension(sourcePath, ".cvm")),
-    ["compile", var sourcePath, "-o", var outputPath] => Compile(sourcePath, outputPath),
+    ["compile", .. var compileArgs] => CompileArguments(compileArgs),
     ["sample", var path] => WriteSample(path),
     _ => Usage(),
 };
@@ -74,11 +73,31 @@ static int WriteSample(string path)
     }
 }
 
-static int Compile(string sourcePath, string outputPath)
+static int CompileArguments(string[] arguments)
+{
+    if (arguments.Length == 0) return Usage();
+    var sourcePath = arguments[0];
+    string? outputPath = null;
+    var optimize = true;
+    for (var index = 1; index < arguments.Length; index++)
+    {
+        if (arguments[index] == "-o" && outputPath is null && index + 1 < arguments.Length)
+            outputPath = arguments[++index];
+        else if (arguments[index] == "--no-optimize" && optimize)
+            optimize = false;
+        else return Usage();
+    }
+    return Compile(sourcePath, outputPath ?? Path.ChangeExtension(sourcePath, ".cvm"), optimize);
+}
+
+static int Compile(string sourcePath, string outputPath, bool optimize)
 {
     try
     {
-        var result = CascadeCompiler.Compile(File.ReadAllText(sourcePath));
+        if (string.Equals(Path.GetFullPath(sourcePath), Path.GetFullPath(outputPath),
+            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+            throw new ArgumentException("Compiler output must not overwrite the source file.");
+        var result = CascadeCompiler.Compile(File.ReadAllText(sourcePath), new CompilationOptions { Optimize = optimize });
         if (!result.Succeeded)
         {
             foreach (var diagnostic in result.Diagnostics)
@@ -87,9 +106,20 @@ static int Compile(string sourcePath, string outputPath)
         }
 
         var program = CascadeProgram.FromModule(result.Module!);
-        using var output = File.Create(outputPath);
-        program.Save(output);
-        Console.WriteLine($"compiled {sourcePath} -> {outputPath} ({program.InstructionCount} instructions)");
+        var temporaryPath = Path.GetFullPath(outputPath) + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            using (var output = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write))
+                program.Save(output);
+            File.Move(temporaryPath, outputPath, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+        }
+        var metrics = result.Metrics!;
+        Console.WriteLine($"compiled {sourcePath} -> {outputPath} ({program.InstructionCount} instructions; " +
+            $"peak {metrics.PeakVectorRegisters} vector, {metrics.PeakMaskRegisters} mask registers)");
         return 0;
     }
     catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
@@ -103,7 +133,7 @@ static int Usage()
 {
     Console.WriteLine("Cascade VM MVP");
     Console.WriteLine("usage:");
-    Console.WriteLine("  cascade compile <file.cascade> [-o <file.cvm>]");
+    Console.WriteLine("  cascade compile <file.cascade> [-o <file.cvm>] [--no-optimize]");
     Console.WriteLine("  cascade sample <file.cvm>  Write a sample module");
     Console.WriteLine("  cascade run <file.cvm>     Validate and execute a module");
     Console.WriteLine("  cascade run <file.cvm> --backend <reference|simd|auto>");

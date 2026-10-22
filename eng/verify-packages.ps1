@@ -51,8 +51,12 @@ var result = instance.Execute();
 instance.State.Register(0).WriteUInt64(0, 0);
 instance.Restart();
 var restartedResult = instance.Execute();
+var batchOutputs = new byte[128];
+var batchResult = instance.ExecuteBatch([], batchOutputs, 0);
+var batchCorrect = batchResult.Succeeded && batchResult.CompletedCount == 2 && batchResult.FuelConsumed == 4 &&
+    System.Buffers.Binary.BinaryPrimitives.ReadUInt64LittleEndian(batchOutputs.AsSpan(64)) == 42;
 var expectedBackend = SimdInterpreter.IsSupported ? ExecutionBackend.HardwareSimd : ExecutionBackend.Reference;
-return result.Succeeded && restartedResult.Succeeded && instance.Backend == expectedBackend && instance.State.Register(0).ReadUInt64(0) == 42 ? 0 : 1;
+return result.Succeeded && restartedResult.Succeeded && batchCorrect && instance.Backend == expectedBackend && instance.State.Register(0).ReadUInt64(0) == 42 ? 0 : 1;
 '@ | Set-Content -LiteralPath (Join-Path $consumerRoot 'Program.cs') -Encoding UTF8
 
     & dotnet restore (Join-Path $consumerRoot 'PackageSmoke.csproj') --source $feedRoot --packages $packagesRoot --no-cache --ignore-failed-sources

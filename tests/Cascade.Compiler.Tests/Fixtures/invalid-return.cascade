@@ -1,0 +1,4 @@
+// Deliberate type error for CLI output-preservation verification.
+kernel invalid(vector<i32> input) -> vector<i64> {
+    return input;
+}

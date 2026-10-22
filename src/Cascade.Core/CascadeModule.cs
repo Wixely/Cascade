@@ -10,10 +10,16 @@ public sealed class CascadeModule
         int entryPoint = 0)
     {
         ArgumentNullException.ThrowIfNull(instructions);
-        Instructions = instructions.ToArray();
-        Constants = constants?.ToArray() ?? [];
-        Functions = functions?.ToArray() ?? [];
-        Imports = imports?.ToArray() ?? [];
+        Instructions = Array.AsReadOnly(instructions.ToArray());
+        var constantArray = constants?.ToArray() ?? [];
+        var importArray = imports?.ToArray() ?? [];
+        if (constantArray.Any(constant => constant is null))
+            throw new ArgumentException("Constants cannot contain null entries.", nameof(constants));
+        if (importArray.Any(import => import is null))
+            throw new ArgumentException("Imports cannot contain null entries.", nameof(imports));
+        Constants = Array.AsReadOnly(constantArray);
+        Functions = Array.AsReadOnly(functions?.ToArray() ?? []);
+        Imports = Array.AsReadOnly(importArray);
         EntryPoint = entryPoint;
     }
 

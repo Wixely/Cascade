@@ -50,7 +50,11 @@ public sealed class ReferenceInterpreter : IVmInterpreter
         State.Restart(_module.EntryPoint);
     }
 
-    public ExecutionResult Execute()
+    public ExecutionResult Execute() => ExecuteCore().ToResult();
+
+    ExecutionOutcome IVmInterpreter.ExecuteCore() => ExecuteCore();
+
+    internal ExecutionOutcome ExecuteCore()
     {
         if (_bindingTrap is not null) return new(false, 0, _bindingTrap);
         while (true)
@@ -112,7 +116,7 @@ public sealed class ReferenceInterpreter : IVmInterpreter
         }
     }
 
-    private ExecutionResult Trapped(TrapCode code, string message) =>
+    private ExecutionOutcome Trapped(TrapCode code, string message) =>
         new(false, State.InitialFuel - State.FuelRemaining, new(code, State.InstructionPointer, message));
 
     private VmTrap? Zero(Instruction i) { State.Register(i.Destination).Clear(); return null; }

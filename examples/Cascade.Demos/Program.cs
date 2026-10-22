@@ -172,7 +172,7 @@ static void RunSourceKernel()
 
     var output = ReadI32(instance.State.Register(0));
     for (var lane = 0; lane < 16; lane++) Equal(lane + 15, output[lane], $"compiled lane {lane}");
-    Console.WriteLine($"compiled  {Path.GetFileName(sourcePath)} ({program.InstructionCount} instructions)");
+    Console.WriteLine($"compiled  {Path.GetFileName(sourcePath)} ({FormatMetrics(compilation)})");
     Console.WriteLine($"output    {Format(output)}");
     Console.WriteLine("The kernel called a helper three times, stored the vector, and loaded it back.");
 }
@@ -197,9 +197,16 @@ static void RunSourceGather()
 
     var output = ReadI32(instance.State.Register(0));
     for (var lane = 0; lane < 16; lane++) Equal(100 + lane, output[lane], $"gathered lane {lane}");
-    Console.WriteLine($"compiled  {Path.GetFileName(sourcePath)} ({program.InstructionCount} instructions)");
+    Console.WriteLine($"compiled  {Path.GetFileName(sourcePath)} ({FormatMetrics(compilation)})");
     Console.WriteLine($"output    {Format(output)}");
     Console.WriteLine("The kernel scattered through reversed addresses, gathered them back, and combined masks.");
+}
+
+static string FormatMetrics(CompilationResult compilation)
+{
+    var metrics = compilation.Metrics!;
+    return $"{metrics.InstructionCount} instructions; peak {metrics.PeakVectorRegisters} vector, " +
+        $"{metrics.PeakMaskRegisters} mask registers";
 }
 
 static HostCallStatus SumI64(HostCallContext context)

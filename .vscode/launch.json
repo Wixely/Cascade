@@ -2,6 +2,26 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "Cascade compiler: generated differential tests",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build",
+      "program": "${workspaceFolder}/tests/Cascade.Compiler.Tests/bin/Debug/net10.0/Cascade.Compiler.Tests.dll",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Cascade benchmark: packed batches",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build",
+      "program": "${workspaceFolder}/tools/Cascade.Benchmarks/bin/Debug/net10.0/Cascade.Benchmarks.dll",
+      "args": ["--batch", "--quick"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    },
+    {
       "name": "Cascade CLI: run sample.cvm",
       "type": "coreclr",
       "request": "launch",

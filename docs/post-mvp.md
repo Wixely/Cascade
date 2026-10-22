@@ -8,7 +8,7 @@
 
 The CLI, conformance suite, and differential harness were cross-published as
 self-contained `linux-x64` applications and executed under Ubuntu 24.04.4 on
-WSL2. All 25 runtime conformance cases and nine compiler cases passed, all five
+WSL2. The runtime conformance and compiler suites passed, all five
 differential corpus cases matched, the harness detected a deliberate divergence,
 and the CLI compiled `.cascade` source and ran the resulting `CVM1` module.
 
@@ -107,13 +107,19 @@ placement, sparse memory, and all four mask Boolean operations.
 
 ## Recommended next action
 
-Introduce a typed compiler intermediate representation with liveness analysis,
-dead-code elimination, and improved temporary-register reuse before adding more
-surface syntax — Owner: TBD — Due: TBD.
+The compiler now includes typed value numbering, scoped common-expression reuse,
+transitive dead-binding elimination, borrow-aware register lifetimes, and one
+liveness analysis per lexical block. Deterministic generated kernels compare
+optimized and unoptimized output with scalar oracles. Use `eng/verify.ps1` to
+run the managed checks and CLI preservation tests together.
 
-The independent runtime-performance action remains designing and measuring a
-batched kernel API before considering CPU-specific AVX2 or AVX-512 code — Owner:
-TBD — Due: TBD.
+Packed batching is implemented and measured by `Cascade.Benchmarks --batch`.
+It preserves ordinary restart, memory, trap, and fuel semantics. Its measured
+advantage over manual restart is modest; instance reuse remains the major gain.
+Successful batch items now use value-type internal results, reducing batch
+result allocations to one per successful batch. Evaluate instruction fusion before
+CPU-specific work — Owner: TBD — Due: TBD. Spilling also needs an explicit
+memory-isolation design before implementation — Owner: TBD — Due: TBD.
 
 Release remains a separate user-owned action: perform the privacy review, create
 the public Wixely GitHub repository, and publish the reviewed v0.1 work — Owner:
