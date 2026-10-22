@@ -19,6 +19,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Core package creation failed.' }
     & dotnet pack (Join-Path $repositoryRoot 'src\Cascade.Runtime\Cascade.Runtime.csproj') -c Release -o $feedRoot
     if ($LASTEXITCODE -ne 0) { throw 'Runtime package creation failed.' }
+    & dotnet pack (Join-Path $repositoryRoot 'src\Cascade.Compiler\Cascade.Compiler.csproj') -c Release -o $feedRoot
+    if ($LASTEXITCODE -ne 0) { throw 'Compiler package creation failed.' }
 
     @'
 <Project Sdk="Microsoft.NET.Sdk">
@@ -30,12 +32,14 @@ try {
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Wixely.Cascade.Runtime" Version="0.1.0" />
+    <PackageReference Include="Wixely.Cascade.Compiler" Version="0.1.0" />
   </ItemGroup>
 </Project>
 '@ | Set-Content -LiteralPath (Join-Path $consumerRoot 'PackageSmoke.csproj') -Encoding UTF8
 
     @'
 using Cascade.Core;
+using Cascade.Compiler;
 using Cascade.Runtime;
 
 var module = new CascadeModule([
@@ -68,7 +72,13 @@ spillProgram.Save(spillBytes);
 spillBytes.Position = 0;
 var spillInstance = CascadeProgram.Load(spillBytes).Instantiate(new VmOptions { MaximumSpillBytes = 64 });
 var spillCorrect = spillInstance.Execute().Succeeded && spillInstance.State.Register(0).ReadUInt64(0) == 99;
-return result.Succeeded && restartedResult.Succeeded && batchCorrect && spillCorrect && instance.Backend == expectedBackend && instance.State.Register(0).ReadUInt64(0) == 42 ? 0 : 1;
+var compiled = CascadeCompiler.Compile("kernel adjust(vector<i32> input) -> vector<i32> { return input * 2 + 1; }");
+if (!compiled.Succeeded) return 1;
+var kernel = CascadeProgram.FromModule(compiled.Module!).Instantiate(new VmOptions { MemorySize = 0, Fuel = 100 });
+for (var lane = 0; lane < 16; lane++) kernel.State.Register(0).WriteUInt32(lane, (uint)lane);
+var compiledCorrect = kernel.Execute().Succeeded;
+for (var lane = 0; lane < 16; lane++) compiledCorrect &= kernel.State.Register(0).ReadInt32(lane) == lane * 2 + 1;
+return result.Succeeded && restartedResult.Succeeded && batchCorrect && spillCorrect && compiledCorrect && instance.Backend == expectedBackend && instance.State.Register(0).ReadUInt64(0) == 42 ? 0 : 1;
 '@ | Set-Content -LiteralPath (Join-Path $consumerRoot 'Program.cs') -Encoding UTF8
 
     & dotnet restore (Join-Path $consumerRoot 'PackageSmoke.csproj') --source $feedRoot --packages $packagesRoot --no-cache --ignore-failed-sources

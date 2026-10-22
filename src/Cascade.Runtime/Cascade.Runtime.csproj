@@ -11,6 +11,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Cascade.Core\Cascade.Core.csproj" />
-    <None Include="..\..\docs\embedding.md" Pack="true" PackagePath="README.md" />
+    <None Include="..\..\docs\library-quickstart.md" Pack="true" PackagePath="README.md" />
   </ItemGroup>
 </Project>

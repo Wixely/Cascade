@@ -1,5 +1,16 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <PackageId>Wixely.Cascade.Compiler</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>Wixely</Authors>
+    <Description>Typed Cascade kernel compiler producing portable CVM1 vector bytecode.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>compiler;virtual-machine;simd;deterministic;vector</PackageTags>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Cascade.Core\Cascade.Core.csproj" />
+    <None Include="..\..\docs\library-quickstart.md" Pack="true" PackagePath="README.md" />
   </ItemGroup>
 </Project>

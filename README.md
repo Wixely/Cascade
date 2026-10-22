@@ -223,6 +223,11 @@ or embedding API to provide application inputs.
 
 ## Embed in a .NET application
 
+For downloadable Core, Runtime, and Compiler packages and a complete compile/run
+example, start with the [library quickstart](docs/library-quickstart.md).
+The [v0.1.0 release](https://github.com/Wixely/Cascade/releases/tag/v0.1.0)
+distributes `.nupkg` files usable as a local NuGet feed.
+
 Reference `src/Cascade.Runtime/Cascade.Runtime.csproj` from a local application,
 or build the `Wixely.Cascade.Runtime` and `Wixely.Cascade.Core` packages as
 described in the [embedding guide](docs/embedding.md). Package creation and
