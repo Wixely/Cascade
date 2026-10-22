@@ -5,7 +5,7 @@
 - Created: 2026-10-20
 - Last reviewed: 2026-10-22
 - Target date: None
-- Intended repository: Public GitHub repository under Wixely; remote not yet created
+- Repository: Public https://github.com/Wixely/Cascade; v0.1.0 published 2026-10-22
 - License: MIT
 - Source: User-supplied "Cascade VM v0.1 — Technical Specification"
 
@@ -242,7 +242,8 @@ Targets remain unset until the project is scheduled.
 
 ## Next actions
 
-- [ ] Create the public Wixely GitHub repository, review the complete outgoing range, and push `main` — Owner: User — Due: TBD
+- [x] Create the public Wixely GitHub repository, review the complete outgoing range, and push `main` — Owner: Codex, authorized by User — Completed: 2026-10-22
+- [x] Publish tagged v0.1.0 Core, Runtime, and Compiler packages with a verified consumer quickstart and downloadable checksums — Owner: Codex — Completed: 2026-10-22
 - [x] Accept or revise the proposed memory defaults, calling convention, fixed encoding, and instruction freeze — Owner: User — Completed: 2026-10-20
 - [x] Resolve semantic questions and turn each answer into a conformance test or decision record — Owner: Codex — Completed: 2026-10-20
 - [x] Create the .NET 10 solution, projects, VS Code configuration, and first NativeAOT feasibility probe — Owner: Codex — Completed: 2026-10-20

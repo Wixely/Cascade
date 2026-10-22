@@ -36,5 +36,15 @@ were already verified on Windows/Linux x64 managed and NativeAOT; this release
 adds compiler packaging, package metadata, and consumer documentation, not new
 VM semantics.
 
-Next action: verify remote main/tag and downloadable release assets after upload
-— Owner: Codex. NuGet.org publication is out of scope for this release.
+## Publication verification
+
+Public visibility, default branch `main`, annotated `v0.1.0` tag, and the published
+release were verified on 2026-10-22. The tag resolves to release commit `30b4a7d`.
+All three packages were downloaded back from GitHub and match the reviewed
+SHA-256 hashes. The exact release packages also restored into an isolated
+consumer and ran the quickstart, producing the odd integers 1 through 31.
+The follow-up publication-status commit changes only documentation and does not
+move the release tag or change its artifacts.
+
+No publication work remains. Recommended next action: use the quickstart in a
+consumer application — Owner: User. NuGet.org publication is out of scope.

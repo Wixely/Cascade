@@ -63,7 +63,7 @@ These are the relevant working preferences copied into Cascade so the repository
 
 - Status: Confirmed for Cascade
 - Preference: Publish Cascade as an open-source GitHub repository under Wixely.
-- Notes: Confirmed by the user on 2026-10-20. The remote repository has not yet been created.
+- Notes: Confirmed by the user on 2026-10-20. Public repository and v0.1.0 release published on 2026-10-22 at https://github.com/Wixely/Cascade.
 
 ### GitHub identity, license, and release defaults
 

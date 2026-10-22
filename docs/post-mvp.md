@@ -131,6 +131,10 @@ than linear memory. The conservative allocator preserves evaluated snapshots,
 mask widths and aligned address pairs; it favors predictable behavior over
 minimum reload counts. `source-spill` is a runnable stress example.
 
-Release remains a separate user-owned action: perform the privacy review, create
-the public Wixely GitHub repository, and publish the reviewed v0.1 work — Owner:
-User — Due: TBD.
+Public release completed on 2026-10-22 following user authorization and full-history
+disclosure review. [v0.1.0](https://github.com/Wixely/Cascade/releases/tag/v0.1.0)
+includes Core, Runtime, and Compiler NuGet packages and SHA-256 checksums. The
+downloaded assets match the reviewed local packages. See the
+[library quickstart](library-quickstart.md). NuGet.org publication is intentionally
+out of scope. Recommended next action: try the packages in a real consumer
+application and report usability gaps — Owner: User — Due: TBD.
