@@ -10,6 +10,8 @@ var tests = new (string Name, Action Body)[]
     ("functions and bounded repeats execute", FunctionsAndRepeats),
     ("typed memory operations execute", TypedMemory),
     ("version 0.2 safety rules reject invalid source", VersionTwoDiagnostics),
+    ("typed gather and scatter execute", GatherAndScatter),
+    ("mask combinators preserve lane semantics", MaskCombinators),
 };
 
 var failures = 0;
@@ -138,6 +140,69 @@ static void VersionTwoDiagnostics()
         fn recurse(vector<i32> value) -> vector<i32> { return recurse(value); }
         kernel bad(vector<i32> value) -> vector<i32> { return recurse(value); }
         """, "CAS125");
+}
+
+static void GatherAndScatter()
+{
+    const string i32Source = """
+        kernel roundtrip(
+            vector<i32> values,
+            vector<i64> addressLow,
+            vector<i64> addressHigh
+        ) -> vector<i32> {
+            let active = values < 108;
+            scatter_i32(addressLow, addressHigh, values, active);
+            return gather_i32(addressLow, addressHigh, active);
+        }
+        """;
+    var instance = Compile(i32Source).Instantiate(new VmOptions { MemorySize = 64 });
+    for (var lane = 0; lane < 16; lane++) instance.State.Register(0).WriteUInt32(lane, (uint)(100 + lane));
+    for (var lane = 0; lane < 8; lane++)
+    {
+        instance.State.Register(1).WriteUInt64(lane, (ulong)(lane * 4));
+        instance.State.Register(2).WriteUInt64(lane, (ulong)((lane + 8) * 4));
+    }
+    Success(instance.Execute());
+    for (var lane = 0; lane < 16; lane++)
+        Equal(lane < 8 ? (uint)(100 + lane) : 0U, instance.State.Register(0).ReadUInt32(lane));
+
+    const string i64Source = """
+        kernel roundtrip(vector<i64> addresses, vector<i64> values) -> vector<i64> {
+            let active = mask_or(mask_all_i64(), mask_none_i64());
+            scatter_i64(addresses, values, active);
+            return gather_i64(addresses, active);
+        }
+        """;
+    instance = Compile(i64Source).Instantiate(new VmOptions { MemorySize = 64 });
+    for (var lane = 0; lane < 8; lane++)
+    {
+        instance.State.Register(0).WriteUInt64(lane, (ulong)(lane * 8));
+        instance.State.Register(1).WriteUInt64(lane, (ulong)(200 + lane));
+    }
+    Success(instance.Execute());
+    for (var lane = 0; lane < 8; lane++) Equal((ulong)(200 + lane), instance.State.Register(0).ReadUInt64(lane));
+}
+
+static void MaskCombinators()
+{
+    const string source = """
+        kernel masks(vector<i32> input) -> vector<i32> {
+            let low = input < 8;
+            let high = mask_not(low);
+            let all = mask_or(low, high);
+            let stillAll = mask_and(all, mask_all_i32());
+            let none = mask_xor(stillAll, all);
+            let keep = mask_or(mask_not(none), mask_none_i32());
+            return select(keep, input, 0);
+        }
+        """;
+    var instance = Compile(source).Instantiate(new VmOptions { MemorySize = 0 });
+    for (var lane = 0; lane < 16; lane++) instance.State.Register(0).WriteUInt32(lane, (uint)lane);
+    Success(instance.Execute());
+    for (var lane = 0; lane < 16; lane++) Equal((uint)lane, instance.State.Register(0).ReadUInt32(lane));
+
+    Diagnostic("kernel bad(vector<i64> a) -> vector<i64> { return select(mask_all_i32(), a, 0); }", "CAS110");
+    Diagnostic("kernel bad(vector<i64> a) -> vector<i64> { scatter_i64(a, a, mask_all_i32()); return a; }", "CAS128");
 }
 
 static CascadeProgram Compile(string source)

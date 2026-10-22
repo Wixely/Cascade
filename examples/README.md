@@ -16,6 +16,8 @@ dotnet run --project examples\Cascade.Demos -- arithmetic masks memory capabilit
 | `masks` | Signed comparison, a 16-bit predicate mask, and lane-wise selection |
 | `memory` | Eight noncontiguous `i64` scatter/gather addresses in fixed linear memory |
 | `capability` | An explicitly declared, fuel-charged host import with no ambient authority |
+| `source` | Language 0.2 functions, bounded repetition, and typed full-register memory |
+| `source-gather` | Language 0.3 typed gather/scatter and mask combinators |
 
 Running without arguments, or with `all`, executes all demos. A failed result
 or unexpected VM state returns a nonzero exit code, so the same command is a
@@ -28,6 +30,15 @@ features include a typed helper function, mutable vector state, a bounded
 
 ```powershell
 dotnet run --project examples\Cascade.Demos -- source
+```
+
+The `source-gather` demo compiles
+[`gather-transform.cascade`](Cascade.Demos/gather-transform.cascade), which uses
+arbitrarily placed i32 address vectors, typed sparse memory operations, and all
+mask Boolean combinators:
+
+```powershell
+dotnet run --project examples\Cascade.Demos -- source-gather
 ```
 
 ## Game of Life bytecode sample

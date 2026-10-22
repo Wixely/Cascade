@@ -6,6 +6,7 @@
     <ProjectReference Include="..\..\src\Cascade.Compiler\Cascade.Compiler.csproj" />
     <ProjectReference Include="..\..\src\Cascade.Core\Cascade.Core.csproj" />
     <ProjectReference Include="..\..\src\Cascade.Runtime\Cascade.Runtime.csproj" />
+    <None Update="gather-transform.cascade" CopyToOutputDirectory="PreserveNewest" />
     <None Update="memory-transform.cascade" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

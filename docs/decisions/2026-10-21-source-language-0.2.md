@@ -41,5 +41,5 @@ functions independent from the v0.1 bytecode calling convention.
 
 - [x] Add execution and diagnostic tests for all 0.2 constructs — Owner: Codex — Completed: 2026-10-21
 - [x] Add a runnable 0.2 source demo — Owner: Codex — Completed: 2026-10-21
-- [ ] Design typed gather/scatter and mask combinators — Owner: TBD — Due: TBD
+- [x] Design typed gather/scatter and mask combinators — Owner: Codex — Completed: 2026-10-22
 - [ ] Add liveness-based register reuse and spilling — Owner: TBD — Due: TBD

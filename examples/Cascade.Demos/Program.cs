@@ -10,6 +10,7 @@ var demos = new Dictionary<string, (string Description, Action Run)>(StringCompa
     ["memory"] = ("Deterministic scatter and gather through linear memory", RunMemory),
     ["capability"] = ("An explicitly declared and bound host capability", RunCapability),
     ["source"] = ("Compile functions, bounded repetition, and typed memory from source", RunSourceKernel),
+    ["source-gather"] = ("Compile typed gather/scatter and mask combinators from source", RunSourceGather),
 };
 
 if (args is ["list"])
@@ -174,6 +175,31 @@ static void RunSourceKernel()
     Console.WriteLine($"compiled  {Path.GetFileName(sourcePath)} ({program.InstructionCount} instructions)");
     Console.WriteLine($"output    {Format(output)}");
     Console.WriteLine("The kernel called a helper three times, stored the vector, and loaded it back.");
+}
+
+static void RunSourceGather()
+{
+    var sourcePath = Path.Combine(AppContext.BaseDirectory, "gather-transform.cascade");
+    var compilation = CascadeCompiler.Compile(File.ReadAllText(sourcePath));
+    if (!compilation.Succeeded)
+        throw new InvalidOperationException(string.Join(Environment.NewLine, compilation.Diagnostics));
+
+    var program = CascadeProgram.FromModule(compilation.Module!);
+    var instance = program.Instantiate(new VmOptions { MemorySize = 64 });
+    for (var lane = 0; lane < 16; lane++) instance.State.Register(0).WriteUInt32(lane, (uint)(100 + lane));
+    for (var lane = 0; lane < 8; lane++)
+    {
+        instance.State.Register(1).WriteUInt64(lane, (ulong)((7 - lane) * 4));
+        instance.State.Register(2).WriteUInt64(lane, (ulong)((15 - lane) * 4));
+    }
+    var result = instance.Execute();
+    if (!result.Succeeded) throw new InvalidOperationException($"VM trapped: {result.Trap!.Code} at instruction {result.Trap.InstructionPointer}");
+
+    var output = ReadI32(instance.State.Register(0));
+    for (var lane = 0; lane < 16; lane++) Equal(100 + lane, output[lane], $"gathered lane {lane}");
+    Console.WriteLine($"compiled  {Path.GetFileName(sourcePath)} ({program.InstructionCount} instructions)");
+    Console.WriteLine($"output    {Format(output)}");
+    Console.WriteLine("The kernel scattered through reversed addresses, gathered them back, and combined masks.");
 }
 
 static HostCallStatus SumI64(HostCallContext context)

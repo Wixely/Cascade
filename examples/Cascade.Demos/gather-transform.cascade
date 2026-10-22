@@ -1,0 +1,18 @@
+// Source-language 0.3: typed scatter/gather and mask combinators.
+kernel gather_transform(
+    vector<i32> values,
+    vector<i64> addressLow,
+    vector<i64> addressHigh
+) -> vector<i32> {
+    let active = mask_all_i32();
+    scatter_i32(addressLow, addressHigh, values, active);
+
+    let gathered = gather_i32(addressLow, addressHigh, active);
+    let low = gathered < 104;
+    let high = mask_not(low);
+    let every = mask_or(low, high);
+    let stillEvery = mask_and(every, mask_all_i32());
+    let none = mask_xor(stillEvery, every);
+
+    return select(mask_not(none), gathered, 0);
+}

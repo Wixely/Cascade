@@ -2,13 +2,13 @@
 
 - Status: Complete
 - Owner: Codex
-- Last verified: 2026-10-21
+- Last verified: 2026-10-22
 
 ## Linux verification
 
 The CLI, conformance suite, and differential harness were cross-published as
 self-contained `linux-x64` applications and executed under Ubuntu 24.04.4 on
-WSL2. All 25 runtime conformance cases and seven compiler cases passed, all five
+WSL2. All 25 runtime conformance cases and nine compiler cases passed, all five
 differential corpus cases matched, the harness detected a deliberate divergence,
 and the CLI compiled `.cascade` source and ran the resulting `CVM1` module.
 
@@ -83,7 +83,7 @@ dotnet run --project tools\Cascade.Benchmarks -c Release -- --quick
 
 ## Typed kernel compiler
 
-`Cascade.Compiler` implements version 0.2 of the `.cascade` source language and
+`Cascade.Compiler` implements version 0.3 of the `.cascade` source language and
 the CLI compiles source directly to `CVM1`. The compiler performs parsing,
 static lane-type checking, deterministic register allocation, and lowering
 without dynamic code generation or external parser dependencies. See [Cascade
@@ -99,11 +99,17 @@ calls and repeats lower deterministically through inlining and unrolling, so
 they introduce neither recursion nor unbounded runtime loops. The runnable
 `source` demo exercises these features together.
 
+Version 0.3 adds typed i32/i64 gather and scatter plus all/none, complement,
+conjunction, disjunction, and exclusive-or mask combinators. The compiler hides
+CVM1's even-aligned i32 address-pair constraint by inserting deterministic
+temporary copies. The `source-gather` demo exercises arbitrary source register
+placement, sparse memory, and all four mask Boolean operations.
+
 ## Recommended next action
 
-Design typed gather/scatter operations and mask combinators for source language
-version 0.3, using executable semantic tests before expanding the parser —
-Owner: TBD — Due: TBD.
+Introduce a typed compiler intermediate representation with liveness analysis,
+dead-code elimination, and improved temporary-register reuse before adding more
+surface syntax — Owner: TBD — Due: TBD.
 
 The independent runtime-performance action remains designing and measuring a
 batched kernel API before considering CPU-specific AVX2 or AVX-512 code — Owner:

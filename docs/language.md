@@ -1,6 +1,6 @@
 # Cascade kernel language
 
-- Language version: 0.2
+- Language version: 0.3
 - File extension: `.cascade`
 - Compiler command: `cascade compile <input.cascade> [-o <output.cvm>]`
 
@@ -60,7 +60,7 @@ rejects it.
 
 A source file contains one kernel and may declare helper functions before it.
 Kernel parameters are assigned to vector
-registers in declaration order, beginning with `v0`. Version 0.2 permits up to
+registers in declaration order, beginning with `v0`. Version 0.3 permits up to
 16 parameters so registers remain available for expressions. The returned
 vector is placed in `v0`, and compilation ends the module with `halt`.
 
@@ -79,7 +79,7 @@ fn add_amount(vector<i32> value, vector<i32> amount) -> vector<i32> {
 }
 ```
 
-The 0.2 compiler deterministically inlines helper calls. Recursion, including
+The compiler deterministically inlines helper calls. Recursion, including
 indirect recursion, is rejected. Inlining keeps CVM1 output independent of a
 source-level calling ABI and lets the compiler type-check every argument.
 
@@ -108,6 +108,41 @@ vector and assign its source-level lane type. `store(address, value)` stores one
 `store` instructions, lane 0 supplies the unsigned byte address. Runtime bounds
 checking and trap-before-effect behavior are unchanged.
 
+## Gather, scatter, and masks
+
+Version 0.3 exposes CVM1's lane-addressed memory operations with static types:
+
+```c
+let active = mask_all_i32();
+scatter_i32(addressLow, addressHigh, values, active);
+let valuesAgain = gather_i32(addressLow, addressHigh, active);
+```
+
+`gather_i32` and `scatter_i32` take two `vector<i64>` address vectors: the first
+supplies addresses for i32 lanes 0-7 and the second for lanes 8-15. The compiler
+copies arbitrary address expressions into an even-aligned consecutive register
+pair when CVM1 encoding requires it. `gather_i64` and `scatter_i64` take one
+address vector. Every operation requires a mask with the matching lane width.
+
+The compiler preserves runtime semantics: all active addresses are validated
+before any effect, inactive gather lanes retain the destination's initial zero,
+and overlapping scatter writes occur in ascending lane order.
+
+Mask constructors and combinators are:
+
+| Built-in | Result |
+| --- | --- |
+| `mask_all_i32()`, `mask_all_i64()` | all lanes active |
+| `mask_none_i32()`, `mask_none_i64()` | no lanes active |
+| `mask_not(mask)` | lane-wise complement |
+| `mask_and(left, right)` | lane-wise conjunction |
+| `mask_or(left, right)` | lane-wise disjunction |
+| `mask_xor(left, right)` | lane-wise exclusive-or |
+
+Binary combinators require identical mask types. Because CVM1 1.0 has no mask
+Boolean opcodes, the compiler lowers these operations through temporary 0/1
+vectors and reconstructs a correctly sized predicate mask.
+
 ## Grammar
 
 ```text
@@ -124,6 +159,7 @@ statement   := "let" identifier "=" expression ";"
              | identifier "=" expression ";"
              | "repeat" integer block
              | "store" "(" expression "," expression ")" ";"
+             | ("scatter_i32" | "scatter_i64") "(" arguments ")" ";"
              | "return" expression ";"
 expression  := identifier | integer | "-" integer
              | "(" expression ")"
@@ -137,8 +173,6 @@ line. Diagnostics include a stable code plus one-based line and column.
 
 ## Current boundaries
 
-Language version 0.2 intentionally has no data-dependent branches, dynamic
-loops, gather/scatter syntax, imports, casts, or mask Boolean operators. These
-remain available at the bytecode level and can be added with corresponding type
-and safety rules. The compiler performs deterministic temporary-register
-allocation but does not yet optimize or spill.
+Language version 0.3 intentionally has no data-dependent branches, dynamic
+loops, imports, casts, mask parameters, or mask returns. The compiler performs
+deterministic temporary-register allocation but does not yet optimize or spill.

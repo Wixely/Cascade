@@ -14,7 +14,7 @@ public sealed record CompilationResult(CascadeModule? Module, IReadOnlyList<Casc
 
 public static class CascadeCompiler
 {
-    public const string LanguageVersion = "0.2";
+    public const string LanguageVersion = "0.3";
 
     public static CompilationResult Compile(string source)
     {
@@ -177,6 +177,7 @@ internal sealed record VarStatementSyntax(string Name, ExpressionSyntax Expressi
 internal sealed record AssignmentStatementSyntax(string Name, ExpressionSyntax Expression, Token Token) : StatementSyntax(Token);
 internal sealed record RepeatStatementSyntax(int Count, IReadOnlyList<StatementSyntax> Statements, Token Token) : StatementSyntax(Token);
 internal sealed record StoreStatementSyntax(ExpressionSyntax Address, ExpressionSyntax Value, Token Token) : StatementSyntax(Token);
+internal sealed record ScatterStatementSyntax(string Name, IReadOnlyList<ExpressionSyntax> Arguments, Token Token) : StatementSyntax(Token);
 internal sealed record ReturnStatementSyntax(ExpressionSyntax Expression, Token Token) : StatementSyntax(Token);
 internal abstract record ExpressionSyntax(Token Token);
 internal sealed record NameExpressionSyntax(string Name, Token Token) : ExpressionSyntax(Token);
@@ -283,6 +284,20 @@ internal sealed class Parser(IReadOnlyList<Token> tokens)
                 Expect(TokenKind.RightParenthesis, "Expected ')' after store arguments.");
                 Expect(TokenKind.Semicolon, "Expected ';' after store.");
                 statements.Add(new StoreStatementSyntax(address, value, token));
+            }
+            else if (Current.Text is "scatter_i32" or "scatter_i64")
+            {
+                var token = Advance();
+                Expect(TokenKind.LeftParenthesis, $"Expected '(' after '{token.Text}'.");
+                var arguments = new List<ExpressionSyntax>();
+                if (Current.Kind != TokenKind.RightParenthesis)
+                {
+                    do arguments.Add(ParseExpression());
+                    while (Match(TokenKind.Comma));
+                }
+                Expect(TokenKind.RightParenthesis, $"Expected ')' after {token.Text} arguments.");
+                Expect(TokenKind.Semicolon, $"Expected ';' after {token.Text}.");
+                statements.Add(new ScatterStatementSyntax(token.Text, arguments, token));
             }
             else if (Current.Kind == TokenKind.Identifier && Peek.Kind == TokenKind.Equal)
             {
@@ -460,7 +475,7 @@ internal sealed class Lowerer
     {
         foreach (var function in _program.Functions)
         {
-            if (function.Name is "select" or "load_i32" or "load_i64" or "store" || !_functions.TryAdd(function.Name, function))
+            if (IsBuiltin(function.Name) || !_functions.TryAdd(function.Name, function))
                 throw Error("CAS114", $"Function name '{function.Name}' is reserved or duplicated.", function.Token);
         }
         if (_functions.ContainsKey(_program.Kernel.Name))
@@ -502,6 +517,7 @@ internal sealed class Lowerer
                 VarStatementSyntax variable => new[] { variable.Expression },
                 AssignmentStatementSyntax assignment => new[] { assignment.Expression },
                 StoreStatementSyntax store => new[] { store.Address, store.Value },
+                ScatterStatementSyntax scatter => scatter.Arguments.ToArray(),
                 ReturnStatementSyntax @return => new[] { @return.Expression },
                 _ => [],
             };
@@ -569,6 +585,9 @@ internal sealed class Lowerer
                         "CAS118", "Store addresses must be vector<i64>.", store.Address.Token);
                     Require(IsVector(TypeOf(store.Value, null, scope)), "CAS119", "Store values must be vectors.", store.Value.Token);
                     break;
+                case ScatterStatementSyntax scatter:
+                    CheckScatter(scatter, scope);
+                    break;
                 case ReturnStatementSyntax @return:
                     Require(allowReturn, "CAS120", "Return is not allowed inside repeat.", @return.Token);
                     var actual = TypeOf(@return.Expression, returnType, scope);
@@ -578,6 +597,27 @@ internal sealed class Lowerer
             }
         }
         return sawReturn;
+    }
+
+    private void CheckScatter(ScatterStatementSyntax scatter, TypeScope scope)
+    {
+        var isI32 = scatter.Name == "scatter_i32";
+        var expectedCount = isI32 ? 4 : 3;
+        Require(scatter.Arguments.Count == expectedCount, "CAS126",
+            $"{scatter.Name} requires {expectedCount} arguments.", scatter.Token);
+        Require(TypeOf(scatter.Arguments[0], SourceType.VectorI64, scope) == SourceType.VectorI64,
+            "CAS118", "Scatter addresses must be vector<i64>.", scatter.Arguments[0].Token);
+        var valueIndex = isI32 ? 2 : 1;
+        var maskIndex = isI32 ? 3 : 2;
+        if (isI32)
+            Require(TypeOf(scatter.Arguments[1], SourceType.VectorI64, scope) == SourceType.VectorI64,
+                "CAS118", "scatter_i32 requires two vector<i64> address vectors.", scatter.Arguments[1].Token);
+        var valueType = isI32 ? SourceType.VectorI32 : SourceType.VectorI64;
+        var maskType = isI32 ? SourceType.MaskI32 : SourceType.MaskI64;
+        Require(TypeOf(scatter.Arguments[valueIndex], valueType, scope) == valueType,
+            "CAS127", $"{scatter.Name} has the wrong value type.", scatter.Arguments[valueIndex].Token);
+        Require(TypeOf(scatter.Arguments[maskIndex], null, scope) == maskType,
+            "CAS128", $"{scatter.Name} has the wrong mask type.", scatter.Arguments[maskIndex].Token);
     }
 
     private SourceType TypeOf(ExpressionSyntax expression, SourceType? expected, TypeScope scope)
@@ -631,6 +671,47 @@ internal sealed class Lowerer
             Require(TypeOf(call.Arguments[0], SourceType.VectorI64, scope) == SourceType.VectorI64,
                 "CAS118", "Load addresses must be vector<i64>.", call.Arguments[0].Token);
             return call.Name == "load_i32" ? SourceType.VectorI32 : SourceType.VectorI64;
+        }
+
+        if (call.Name is "gather_i32" or "gather_i64")
+        {
+            var isI32 = call.Name == "gather_i32";
+            var expectedCount = isI32 ? 3 : 2;
+            Require(call.Arguments.Count == expectedCount, "CAS126",
+                $"{call.Name} requires {expectedCount} arguments.", call.Token);
+            Require(TypeOf(call.Arguments[0], SourceType.VectorI64, scope) == SourceType.VectorI64,
+                "CAS118", "Gather addresses must be vector<i64>.", call.Arguments[0].Token);
+            if (isI32)
+                Require(TypeOf(call.Arguments[1], SourceType.VectorI64, scope) == SourceType.VectorI64,
+                    "CAS118", "gather_i32 requires two vector<i64> address vectors.", call.Arguments[1].Token);
+            var maskIndex = isI32 ? 2 : 1;
+            var maskType = isI32 ? SourceType.MaskI32 : SourceType.MaskI64;
+            Require(TypeOf(call.Arguments[maskIndex], null, scope) == maskType,
+                "CAS128", $"{call.Name} has the wrong mask type.", call.Arguments[maskIndex].Token);
+            return isI32 ? SourceType.VectorI32 : SourceType.VectorI64;
+        }
+
+        if (call.Name is "mask_all_i32" or "mask_none_i32" or "mask_all_i64" or "mask_none_i64")
+        {
+            Require(call.Arguments.Count == 0, "CAS121", $"{call.Name} takes no arguments.", call.Token);
+            return call.Name.EndsWith("i32", StringComparison.Ordinal) ? SourceType.MaskI32 : SourceType.MaskI64;
+        }
+
+        if (call.Name == "mask_not")
+        {
+            Require(call.Arguments.Count == 1, "CAS121", "mask_not requires one argument.", call.Token);
+            var maskType = TypeOf(call.Arguments[0], null, scope);
+            Require(IsMask(maskType), "CAS129", "mask_not requires a mask.", call.Arguments[0].Token);
+            return maskType;
+        }
+
+        if (call.Name is "mask_and" or "mask_or" or "mask_xor")
+        {
+            Require(call.Arguments.Count == 2, "CAS121", $"{call.Name} requires two arguments.", call.Token);
+            var left = TypeOf(call.Arguments[0], null, scope);
+            var right = TypeOf(call.Arguments[1], null, scope);
+            Require(IsMask(left) && right == left, "CAS129", $"{call.Name} requires masks with the same lane type.", call.Token);
+            return left;
         }
 
         if (!_functions.TryGetValue(call.Name, out var function))
@@ -703,6 +784,9 @@ internal sealed class Lowerer
                     Release(address);
                     Release(value);
                     break;
+                case ScatterStatementSyntax scatter:
+                    EmitScatter(scatter, scope);
+                    break;
                 case ReturnStatementSyntax @return:
                     return Emit(@return.Expression, scope);
             }
@@ -747,6 +831,9 @@ internal sealed class Lowerer
                     Add(new(Opcode.Store, SourceA: address.Index, SourceB: value.Index), store.Token);
                     Release(address);
                     Release(value);
+                    break;
+                case ScatterStatementSyntax scatter:
+                    EmitScatter(scatter, scope);
                     break;
             }
         }
@@ -802,6 +889,11 @@ internal sealed class Lowerer
             Release(address);
             return new(_expressionTypes[call], destination, true);
         }
+        if (call.Name is "gather_i32" or "gather_i64") return EmitGather(call, scope);
+        if (call.Name.StartsWith("mask_all_", StringComparison.Ordinal)) return EmitMaskConstant(call, all: true);
+        if (call.Name.StartsWith("mask_none_", StringComparison.Ordinal)) return EmitMaskConstant(call, all: false);
+        if (call.Name == "mask_not") return EmitMaskNot(call, scope);
+        if (call.Name is "mask_and" or "mask_or" or "mask_xor") return EmitMaskBinary(call, scope);
 
         var function = _functions[call.Name];
         if (!_activeCalls.Add(function.Name))
@@ -817,6 +909,135 @@ internal sealed class Lowerer
         foreach (var argument in arguments) Release(argument);
         _activeCalls.Remove(function.Name);
         return copy;
+    }
+
+    private Value EmitGather(CallExpressionSyntax call, ValueScope scope)
+    {
+        var isI32 = call.Name == "gather_i32";
+        var low = Emit(call.Arguments[0], scope);
+        if (!isI32)
+        {
+            var mask64 = Emit(call.Arguments[1], scope);
+            var destination64 = AllocateRegister(call.Token);
+            Add(new(Opcode.Zero, Destination: destination64), call.Token);
+            Add(new(Opcode.GatherI64, Destination: destination64, SourceA: low.Index, Mask: mask64.Index), call.Token);
+            Release(low);
+            Release(mask64);
+            return new(SourceType.VectorI64, destination64, true);
+        }
+
+        var high = Emit(call.Arguments[1], scope);
+        var mask = Emit(call.Arguments[2], scope);
+        var pair = PrepareAddressPair(low, high, call.Token);
+        var destination = AllocateRegister(call.Token);
+        Add(new(Opcode.Zero, Destination: destination), call.Token);
+        Add(new(Opcode.GatherI32, Destination: destination, SourceA: pair.Index, Mask: mask.Index), call.Token);
+        Release(low);
+        Release(high);
+        Release(mask);
+        Release(pair);
+        return new(SourceType.VectorI32, destination, true);
+    }
+
+    private void EmitScatter(ScatterStatementSyntax scatter, ValueScope scope)
+    {
+        var isI32 = scatter.Name == "scatter_i32";
+        var low = Emit(scatter.Arguments[0], scope);
+        if (!isI32)
+        {
+            var value64 = Emit(scatter.Arguments[1], scope);
+            var mask64 = Emit(scatter.Arguments[2], scope);
+            Add(new(Opcode.ScatterI64, SourceA: low.Index, SourceB: value64.Index, Mask: mask64.Index), scatter.Token);
+            Release(low);
+            Release(value64);
+            Release(mask64);
+            return;
+        }
+
+        var high = Emit(scatter.Arguments[1], scope);
+        var value = Emit(scatter.Arguments[2], scope);
+        var mask = Emit(scatter.Arguments[3], scope);
+        var pair = PrepareAddressPair(low, high, scatter.Token);
+        Add(new(Opcode.ScatterI32, SourceA: pair.Index, SourceB: value.Index, Mask: mask.Index), scatter.Token);
+        Release(low);
+        Release(high);
+        Release(value);
+        Release(mask);
+        Release(pair);
+    }
+
+    private Value EmitMaskConstant(CallExpressionSyntax call, bool all)
+    {
+        var type = _expressionTypes[call];
+        var vectorType = VectorType(type);
+        var zero = AllocateRegister(call.Token);
+        Add(new(Opcode.Zero, Destination: zero), call.Token);
+        var mask = AllocateMask(call.Token);
+        Add(new(all ? ComparisonOpcode(TokenKind.EqualEqual, vectorType) : ComparisonOpcode(TokenKind.Less, vectorType),
+            SourceA: zero, SourceB: zero, Mask: mask), call.Token);
+        Release(new Value(vectorType, zero, true));
+        return new(type, mask, true);
+    }
+
+    private Value EmitMaskNot(CallExpressionSyntax call, ValueScope scope)
+    {
+        var mask = Emit(call.Arguments[0], scope);
+        var vector = MaterializeMask(mask, call.Token);
+        var zero = AllocateRegister(call.Token);
+        Add(new(Opcode.Zero, Destination: zero), call.Token);
+        var result = AllocateMask(call.Token);
+        Add(new(ComparisonOpcode(TokenKind.EqualEqual, vector.Type), SourceA: vector.Index, SourceB: zero, Mask: result), call.Token);
+        Release(vector);
+        Release(new Value(vector.Type, zero, true));
+        return new(mask.Type, result, true);
+    }
+
+    private Value EmitMaskBinary(CallExpressionSyntax call, ValueScope scope)
+    {
+        var leftMask = Emit(call.Arguments[0], scope);
+        var rightMask = Emit(call.Arguments[1], scope);
+        var left = MaterializeMask(leftMask, call.Token);
+        var right = MaterializeMask(rightMask, call.Token);
+        var opcode = call.Name switch
+        {
+            "mask_and" => Opcode.And,
+            "mask_or" => Opcode.Or,
+            "mask_xor" => Opcode.Xor,
+            _ => throw new InvalidOperationException(),
+        };
+        Add(new(opcode, Destination: left.Index, SourceA: left.Index, SourceB: right.Index), call.Token);
+        Release(right);
+        var one = AllocateRegister(call.Token);
+        Add(new(left.Type == SourceType.VectorI32 ? Opcode.SplatI32 : Opcode.SplatI64, Destination: one, Immediate: 1), call.Token);
+        var result = AllocateMask(call.Token);
+        Add(new(ComparisonOpcode(TokenKind.EqualEqual, left.Type), SourceA: left.Index, SourceB: one, Mask: result), call.Token);
+        Release(left);
+        Release(new Value(left.Type, one, true));
+        return new(_expressionTypes[call], result, true);
+    }
+
+    private Value MaterializeMask(Value mask, Token token)
+    {
+        var type = VectorType(mask.Type);
+        var one = AllocateRegister(token);
+        Add(new(type == SourceType.VectorI32 ? Opcode.SplatI32 : Opcode.SplatI64, Destination: one, Immediate: 1), token);
+        var zero = AllocateRegister(token);
+        Add(new(Opcode.Zero, Destination: zero), token);
+        Add(new(type == SourceType.VectorI32 ? Opcode.SelectI32 : Opcode.SelectI64,
+            Destination: one, SourceA: one, SourceB: zero, Mask: mask.Index), token);
+        Release(new Value(type, zero, true));
+        Release(mask);
+        return new(type, one, true);
+    }
+
+    private RegisterPair PrepareAddressPair(Value low, Value high, Token token)
+    {
+        if ((low.Index & 1) == 0 && high.Index == low.Index + 1)
+            return new(low.Index, Owned: false);
+        var pair = AllocateRegisterPair(token);
+        Add(new(Opcode.Move, Destination: pair, SourceA: low.Index), token);
+        Add(new(Opcode.Move, Destination: checked((byte)(pair + 1)), SourceA: high.Index), token);
+        return new(pair, Owned: true);
     }
 
     private Value EmitSelect(CallExpressionSyntax call, ValueScope scope)
@@ -866,6 +1087,18 @@ internal sealed class Lowerer
         throw Error("CAS200", "The kernel requires more than 32 vector registers.", token);
     }
 
+    private byte AllocateRegisterPair(Token token)
+    {
+        for (var index = 0; index <= 30; index += 2)
+        {
+            if (_registers[index] || _registers[index + 1]) continue;
+            _registers[index] = true;
+            _registers[index + 1] = true;
+            return (byte)index;
+        }
+        throw Error("CAS203", "i32 gather/scatter requires a free even-aligned register pair.", token);
+    }
+
     private byte AllocateMask(Token token)
     {
         for (byte index = 0; index < _masks.Length; index++)
@@ -883,6 +1116,13 @@ internal sealed class Lowerer
         if (!value.Owned) return;
         if (IsMask(value.Type)) _masks[value.Index] = false;
         else _registers[value.Index] = false;
+    }
+
+    private void Release(RegisterPair pair)
+    {
+        if (!pair.Owned) return;
+        _registers[pair.Index] = false;
+        _registers[pair.Index + 1] = false;
     }
 
     private static Opcode VectorOpcode(TokenKind op, SourceType type) => (op, type) switch
@@ -921,6 +1161,11 @@ internal sealed class Lowerer
     private static int LaneType(SourceType type) => type is SourceType.VectorI32 or SourceType.MaskI32 ? 32 : 64;
     private static SourceType MaskType(SourceType type) => type == SourceType.VectorI32 ? SourceType.MaskI32 : SourceType.MaskI64;
     private static SourceType VectorType(SourceType type) => type == SourceType.MaskI32 ? SourceType.VectorI32 : SourceType.VectorI64;
+    private static bool IsBuiltin(string name) => name is
+        "select" or "load_i32" or "load_i64" or "store" or
+        "gather_i32" or "gather_i64" or "scatter_i32" or "scatter_i64" or
+        "mask_all_i32" or "mask_none_i32" or "mask_all_i64" or "mask_none_i64" or
+        "mask_not" or "mask_and" or "mask_or" or "mask_xor";
     private static string Display(SourceType type) => type switch
     {
         SourceType.VectorI32 => "vector<i32>",
@@ -943,6 +1188,7 @@ internal sealed class Lowerer
 
     private static CompilationFailure Error(string code, string message, Token token) => new(new(code, message, token.Line, token.Column));
     private readonly record struct Value(SourceType Type, byte Index, bool Owned);
+    private readonly record struct RegisterPair(byte Index, bool Owned);
     private readonly record struct TypeBinding(SourceType Type, bool Mutable);
     private readonly record struct ValueBinding(Value Value, bool Mutable, bool OwnsStorage);
 
