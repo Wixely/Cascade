@@ -47,7 +47,7 @@ The first useful result is a tested C#/.NET 10 runtime that executes decoded in-
 | Module format | Versioned `.cvm` binary |
 | Implementation | C# on .NET 10 |
 
-All program-visible general-purpose data lives in vector registers or linear memory. The instruction pointer, call stack, masks, fuel, and execution bookkeeping are VM control state rather than scalar variables exposed to programs.
+In the v0.1 baseline, all program-visible general-purpose data lives in vector registers or linear memory. The post-MVP CVM1 1.1 extension adds private vector and mask spill slots accessed only by explicit spill instructions. The instruction pointer, call stack, masks, fuel, and execution bookkeeping are VM control state rather than scalar variables exposed to programs.
 
 Modules are immutable and may be shared by instances. Registers, masks, mask widths, memory, call stack, instruction pointer, fuel, and import bindings belong to one instance and are not shared unless the host explicitly arranges it.
 
@@ -259,7 +259,11 @@ Targets remain unset until the project is scheduled.
 - [x] Add optimizer differential/generated-program coverage before implementing common-expression reuse — Owner: Codex — Completed: 2026-10-22
 - [x] Add scoped common-expression reuse with mutation and repeat-boundary tests — Owner: Codex — Completed: 2026-10-22
 - [x] Design and benchmark batched kernel execution before choosing an AVX2- or AVX-512-specific backend — Owner: Codex — Completed: 2026-10-22
-- [ ] Evaluate spilling and instruction fusion using measured workloads; define semantics before implementation — Owner: TBD — Due: TBD
+- [x] Define and evaluate opt-in compare/select dispatch fusion with exact fuel/state equivalence — Owner: Codex — Completed: 2026-10-22
+- [x] Measure fusion on representative compiled kernels including setup amortization; retain opt-in status — Owner: Codex — Completed: 2026-10-22
+- [x] Draft an [isolated spill-storage proposal](spilling-proposal.md), without changing CVM1 — Owner: Codex — Completed: 2026-10-22
+- [x] Approve spill format/version and call-frame choices — Owner: User — Completed: 2026-10-22
+- [x] Implement and cross-platform verify CVM1 1.1 private spills and virtual-register lowering — Owner: Codex — Completed: 2026-10-22
 
 ## Open questions
 

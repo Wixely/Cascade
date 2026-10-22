@@ -1,0 +1,5 @@
+// Bound sixteen signed values to a caller-supplied interval.
+kernel clamp(vector<i32> value, vector<i32> minimum, vector<i32> maximum) -> vector<i32> {
+    let lowerBounded = select(value < minimum, minimum, value);
+    return select(maximum < lowerBounded, maximum, lowerBounded);
+}

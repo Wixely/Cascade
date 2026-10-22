@@ -35,6 +35,10 @@ var tests = new (string Name, Action Body)[]
     ("host imports bind and precharge fuel", HostImports),
     ("host import failures are bounded and redacted", HostImportFailures),
     ("deterministic replay", Replay),
+    ("dispatch fusion preserves full state and fuel boundaries", FusionChecks.Run),
+    ("invalid module diagnostics are bounded", BoundedDiagnostics),
+    ("private spill storage preserves state, fuel, isolation and restart", SpillChecks.Execution),
+    ("CVM1 spill metadata is versioned, bounded and canonical", SpillChecks.FormatAndLimits),
 };
 
 var failed = 0;
@@ -53,6 +57,31 @@ foreach (var (name, body) in tests)
 }
 Console.WriteLine($"{tests.Length - failed}/{tests.Length} conformance cases passed");
 return failed == 0 ? 0 : 1;
+
+static void BoundedDiagnostics()
+{
+    foreach (var metadataModule in new[]
+    {
+        new CascadeModule([new(Opcode.Halt)], functions: Enumerable.Repeat(new FunctionDefinition(2, 1), 1_000)),
+        new CascadeModule([new(Opcode.Halt)], imports: Enumerable.Repeat(new ImportDefinition("", "", 0, 0), 1_000)),
+    })
+    {
+        var metadataErrors = ModuleValidator.Validate(metadataModule);
+        Equal(ModuleValidator.MaximumDiagnostics, metadataErrors.Count);
+        if (!metadataErrors[^1].Message.Contains("diagnostic limit", StringComparison.Ordinal))
+            throw new InvalidOperationException("Missing metadata validation truncation notice.");
+    }
+    var module = new CascadeModule(Enumerable.Repeat(new Instruction((Opcode)ushort.MaxValue), 10_000));
+    var errors = ModuleValidator.Validate(module);
+    Equal(ModuleValidator.MaximumDiagnostics, errors.Count);
+    Equal(0, errors[0].InstructionIndex);
+    Equal(-1, errors[^1].InstructionIndex);
+    if (!errors[^1].Message.Contains("diagnostic limit", StringComparison.Ordinal))
+        throw new InvalidOperationException("Missing validation truncation notice.");
+    try { _ = CascadeProgram.FromModule(module); }
+    catch (ArgumentException exception) when (exception.Message.Length < 20_000) { return; }
+    throw new InvalidOperationException("Invalid module was accepted or produced an unbounded exception.");
+}
 
 static void Arithmetic()
 {

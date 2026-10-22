@@ -120,6 +120,10 @@ static int Compile(string sourcePath, string outputPath, bool optimize)
         var metrics = result.Metrics!;
         Console.WriteLine($"compiled {sourcePath} -> {outputPath} ({program.InstructionCount} instructions; " +
             $"peak {metrics.PeakVectorRegisters} vector, {metrics.PeakMaskRegisters} mask registers)");
+        if (program.SpillStorageBytes != 0)
+            Console.WriteLine($"CVM1 1.1: {metrics.VectorSpillSlots} vector and {metrics.MaskSpillSlots} mask spill slots; " +
+                $"{program.SpillStorageBytes} private bytes; {metrics.SpillStores} stores, {metrics.SpillReloads} reloads; " +
+                $"virtual pressure {metrics.PeakVirtualVectorRegisters} vector, {metrics.PeakVirtualMaskRegisters} mask");
         return 0;
     }
     catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)

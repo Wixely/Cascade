@@ -3,7 +3,13 @@
     <OutputType>Exe</OutputType>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="..\..\src\Cascade.Compiler\Cascade.Compiler.csproj" />
     <ProjectReference Include="..\..\src\Cascade.Core\Cascade.Core.csproj" />
     <ProjectReference Include="..\..\src\Cascade.Runtime\Cascade.Runtime.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\examples\Cascade.GameOfLife\life-rule.cascade" Link="Kernels\life-rule.cascade" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\examples\Cascade.Demos\gather-transform.cascade" Link="Kernels\gather-transform.cascade" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Kernels\clamp.cascade" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

@@ -18,6 +18,7 @@ dotnet run --project examples\Cascade.Demos -- arithmetic masks memory capabilit
 | `capability` | An explicitly declared, fuel-charged host import with no ambient authority |
 | `source` | Language 0.2 functions, bounded repetition, and typed full-register memory |
 | `source-gather` | Language 0.3 typed gather/scatter and mask combinators |
+| `source-spill` | More live vectors/masks than the register banks, using private CVM1 1.1 slots |
 
 Running without arguments, or with `all`, executes all demos. A failed result
 or unexpected VM state returns a nonzero exit code, so the same command is a
@@ -40,6 +41,24 @@ mask Boolean combinators:
 ```powershell
 dotnet run --project examples\Cascade.Demos -- source-gather
 ```
+
+## Private-spill source sample
+
+[`spill-stress.cascade`](Cascade.Demos/spill-stress.cascade) deliberately retains
+36 vector values and 12 masks. It is a register-pressure test, not a claim that
+this expression needs that many temporaries in an optimal implementation. The
+current allocator emits 257 instructions, 14 vector slots and six mask slots
+(992 private bytes), with 44 stores and 44 reloads. The runner verifies scalar
+results on both available backends with **zero linear-memory bytes**.
+
+```powershell
+dotnet run --project examples\Cascade.Demos -- source-spill
+dotnet run --project src\Cascade.Cli -- compile examples\Cascade.Demos\spill-stress.cascade -o artifacts\spill-stress.cvm
+dotnet run --project src\Cascade.Cli -- run artifacts\spill-stress.cvm
+```
+
+Old runtimes reject the 1.1 binary explicitly. Kernels not needing private slots
+still compile to the original 1.0 format.
 
 ## Game of Life bytecode sample
 

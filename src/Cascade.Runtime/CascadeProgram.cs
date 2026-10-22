@@ -12,6 +12,9 @@ public sealed class CascadeProgram
     public int InstructionCount => _module.Instructions.Count;
     public int ConstantCount => _module.Constants.Count;
     public int FunctionCount => _module.Functions.Count;
+    public int VectorSpillSlots => _module.VectorSpillSlots;
+    public int MaskSpillSlots => _module.MaskSpillSlots;
+    public int SpillStorageBytes => _module.SpillStorageBytes;
     public IReadOnlyList<ImportDefinition> Imports => _module.Imports;
 
     public static CascadeProgram Load(Stream stream) => FromModule(CvmModuleFormat.Read(stream));

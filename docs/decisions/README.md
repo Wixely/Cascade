@@ -28,3 +28,5 @@ The initial decision queue is listed under [Open questions](../plan.md#open-ques
 - [Add typed value-numbered compiler IR](2026-10-22-typed-compiler-ir.md)
 - [Verify compiler transformations and preserve value lifetimes](2026-10-22-compiler-verification-and-lifetimes.md)
 - [Add sequential packed kernel batches](2026-10-22-packed-kernel-batches.md)
+- [Evaluate opt-in compare/select dispatch fusion](2026-10-22-dispatch-fusion-prototype.md)
+- [Add private spill storage in CVM1 1.1](2026-10-22-private-spill-storage.md)

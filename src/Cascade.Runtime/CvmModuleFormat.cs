@@ -4,10 +4,10 @@ using Cascade.Core;
 
 namespace Cascade.Runtime;
 
-/// <summary>Canonical reader and writer for the sectioned CVM1 version 1.0 container.</summary>
+/// <summary>Canonical reader and writer for CVM1 1.0 and the 1.1 private-spill extension.</summary>
 public static class CvmModuleFormat
 {
-    private enum SectionType : uint { Code = 1, Constants = 2, Functions = 3, Imports = 4 }
+    private enum SectionType : uint { Code = 1, Constants = 2, Functions = 3, Imports = 4, Spills = 5 }
     private readonly record struct Section(SectionType Type, uint Flags, byte[] Data);
     private readonly record struct DirectoryEntry(uint Type, uint Flags, ulong Offset, ulong Length);
 
@@ -40,7 +40,8 @@ public static class CvmModuleFormat
         var header = file.AsSpan(0, HeaderSize);
 
         if (!header[..4].SequenceEqual(Magic)) throw new InvalidDataException("Invalid CVM magic; expected CVM1.");
-        if (header[4] != 1 || header[5] != 0) throw new InvalidDataException($"Unsupported CVM version {header[4]}.{header[5]}.");
+        if (header[4] != 1 || header[5] > 1) throw new InvalidDataException($"Unsupported CVM version {header[4]}.{header[5]}.");
+        var hasSpills = header[5] == 1;
         if (BinaryPrimitives.ReadUInt16LittleEndian(header[6..]) != HeaderSize) throw new InvalidDataException("Invalid header size.");
         if (BinaryPrimitives.ReadUInt32LittleEndian(header[8..]) != 0) throw new InvalidDataException("Header flags are reserved and must be zero.");
         var sectionCount = BinaryPrimitives.ReadUInt32LittleEndian(header[12..]);
@@ -90,6 +91,9 @@ public static class CvmModuleFormat
         VectorConstant[] constants = [];
         FunctionDefinition[] functions = [];
         ImportDefinition[] imports = [];
+        var vectorSpillSlots = 0;
+        var maskSpillSlots = 0;
+        var spillSectionSeen = false;
         foreach (var entry in entries)
         {
             var data = file.AsSpan(checked((int)entry.Offset), checked((int)entry.Length));
@@ -99,10 +103,26 @@ public static class CvmModuleFormat
                 case SectionType.Constants: constants = ReadConstants(data); break;
                 case SectionType.Functions: functions = ReadFunctions(data); break;
                 case SectionType.Imports: imports = ReadImports(data); break;
+                case SectionType.Spills:
+                    // Type 5 was an unknown optional extension in 1.0. Preserve
+                    // that version's skip rule rather than reinterpret its bytes.
+                    if (!hasSpills && entry.Flags == 0) break;
+                    if (!hasSpills || entry.Flags != RequiredSection || data.Length != 16 ||
+                        BinaryPrimitives.ReadUInt32LittleEndian(data) != 1 || BinaryPrimitives.ReadUInt32LittleEndian(data[4..]) != 0)
+                        throw new InvalidDataException("Invalid spill section or version.");
+                    var vectors = BinaryPrimitives.ReadUInt32LittleEndian(data[8..]);
+                    var masks = BinaryPrimitives.ReadUInt32LittleEndian(data[12..]);
+                    if (vectors > CascadeModule.MaximumSpillSlots || masks > CascadeModule.MaximumSpillSlots || (vectors == 0 && masks == 0))
+                        throw new InvalidDataException("Invalid spill slot counts.");
+                    vectorSpillSlots = (int)vectors;
+                    maskSpillSlots = (int)masks;
+                    spillSectionSeen = true;
+                    break;
             }
         }
 
-        var module = new CascadeModule(instructions, constants, functions, imports, checked((int)entryPoint));
+        if (hasSpills != spillSectionSeen) throw new InvalidDataException("CVM1 1.1 requires a spill section.");
+        var module = new CascadeModule(instructions, constants, functions, imports, checked((int)entryPoint), vectorSpillSlots, maskSpillSlots);
         var errors = ModuleValidator.Validate(module);
         if (errors.Count != 0)
             throw new InvalidDataException($"Module validation failed: {string.Join("; ", errors.Select(error => $"[{error.InstructionIndex}] {error.Message}"))}");
@@ -124,11 +144,20 @@ public static class CvmModuleFormat
         if (module.Constants.Count != 0) sections.Add(new(SectionType.Constants, 0, WriteConstants(module.Constants)));
         if (module.Functions.Count != 0) sections.Add(new(SectionType.Functions, 0, WriteFunctions(module.Functions)));
         if (module.Imports.Count != 0) sections.Add(new(SectionType.Imports, 0, WriteImports(module.Imports)));
+        if (module.SpillStorageBytes != 0)
+        {
+            var spillData = new byte[16];
+            BinaryPrimitives.WriteUInt32LittleEndian(spillData, 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(spillData.AsSpan(8), (uint)module.VectorSpillSlots);
+            BinaryPrimitives.WriteUInt32LittleEndian(spillData.AsSpan(12), (uint)module.MaskSpillSlots);
+            sections.Add(new(SectionType.Spills, RequiredSection, spillData));
+        }
 
         Span<byte> header = stackalloc byte[HeaderSize];
         header.Clear();
         Magic.CopyTo(header);
         header[4] = 1;
+        header[5] = module.SpillStorageBytes == 0 ? (byte)0 : (byte)1;
         BinaryPrimitives.WriteUInt16LittleEndian(header[6..], HeaderSize);
         BinaryPrimitives.WriteUInt32LittleEndian(header[12..], (uint)sections.Count);
         BinaryPrimitives.WriteUInt32LittleEndian(header[16..], HeaderSize);

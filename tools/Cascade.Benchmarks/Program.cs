@@ -3,6 +3,8 @@ using Cascade.Core;
 using Cascade.Runtime;
 
 if (args.Contains("--batch", StringComparer.Ordinal)) return BatchBenchmark.Run(args.Contains("--quick", StringComparer.Ordinal));
+if (args.Contains("--fusion", StringComparer.Ordinal)) return FusionBenchmark.Run(args.Contains("--quick", StringComparer.Ordinal));
+if (args.Contains("--fusion-compiled", StringComparer.Ordinal)) return CompiledFusionBenchmark.Run(args.Contains("--quick", StringComparer.Ordinal));
 
 var iterations = args is ["--quick"] ? 25 : 100;
 var corpus = new (string Name, CascadeModule Module)[]

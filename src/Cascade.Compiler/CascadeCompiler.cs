@@ -7,7 +7,15 @@ public sealed record CascadeDiagnostic(string Code, string Message, int Line, in
     public override string ToString() => $"{Line}:{Column}: {Code}: {Message}";
 }
 
-public sealed record CompilationMetrics(int InstructionCount, int PeakVectorRegisters, int PeakMaskRegisters);
+public sealed record CompilationMetrics(int InstructionCount, int PeakVectorRegisters, int PeakMaskRegisters)
+{
+    public int PeakVirtualVectorRegisters { get; init; }
+    public int PeakVirtualMaskRegisters { get; init; }
+    public int VectorSpillSlots { get; init; }
+    public int MaskSpillSlots { get; init; }
+    public int SpillStores { get; init; }
+    public int SpillReloads { get; init; }
+}
 
 public sealed record CompilationOptions
 {
@@ -40,7 +48,18 @@ public static class CascadeCompiler
             var program = new Parser(new Lexer(source).Lex()).ParseProgram();
             var lowerer = new Lowerer(program, options.Optimize);
             var module = lowerer.Compile();
-            return new(module, []) { Metrics = new(module.Instructions.Count, lowerer.PeakVectorRegisters, lowerer.PeakMaskRegisters) };
+            return new(module, [])
+            {
+                Metrics = new(module.Instructions.Count, Math.Min(32, lowerer.PeakVectorRegisters), Math.Min(8, lowerer.PeakMaskRegisters))
+                {
+                    PeakVirtualVectorRegisters = lowerer.PeakVectorRegisters,
+                    PeakVirtualMaskRegisters = lowerer.PeakMaskRegisters,
+                    VectorSpillSlots = module.VectorSpillSlots,
+                    MaskSpillSlots = module.MaskSpillSlots,
+                    SpillStores = lowerer.SpillStores,
+                    SpillReloads = lowerer.SpillReloads,
+                }
+            };
         }
         catch (CompilationFailure failure)
         {
@@ -501,9 +520,9 @@ internal sealed class Lowerer
     private readonly Dictionary<string, FunctionSyntax> _functions = new(StringComparer.Ordinal);
     private readonly Dictionary<ExpressionSyntax, SourceType> _expressionTypes = new();
     private readonly HashSet<string> _activeCalls = new(StringComparer.Ordinal);
-    private readonly bool[] _registers = new bool[32];
-    private readonly bool[] _masks = new bool[8];
-    private readonly List<Instruction> _instructions = [];
+    private readonly VirtualRegisterPool _registers = new(32, CascadeModule.MaximumSpillSlots + 24);
+    private readonly VirtualRegisterPool _masks = new(8, CascadeModule.MaximumSpillSlots + 6);
+    private readonly List<VirtualInstruction> _instructions = [];
     private readonly bool _optimize;
     private int _expandedWork;
     private int _emissionDepth;
@@ -511,6 +530,8 @@ internal sealed class Lowerer
 
     public int PeakVectorRegisters { get; private set; }
     public int PeakMaskRegisters { get; private set; }
+    public int SpillStores { get; private set; }
+    public int SpillReloads { get; private set; }
 
     public Lowerer(ProgramSyntax program, bool optimize)
     {
@@ -535,7 +556,7 @@ internal sealed class Lowerer
             _registers[index] = true;
             var parameter = _program.Kernel.Parameters[index];
             scope.Define(parameter.Name,
-                new(new(parameter.Type, (byte)index, false), mutable: false, ownsStorage: false,
+                new(new(parameter.Type, index, false), mutable: false, ownsStorage: false,
                     remainingUses: _liveness.UsesOf(parameter.Name, _program.Kernel.Statements)));
         }
         TrackRegisterPressure();
@@ -545,7 +566,10 @@ internal sealed class Lowerer
             Add(new(Opcode.Move, Destination: 0, SourceA: result.Index), _program.Kernel.Token);
         Release(result);
         Add(new(Opcode.Halt), _program.Kernel.Token);
-        return new(_instructions);
+        var lowered = SpillAllocator.Lower(_instructions, _registers.Count, _masks.Count, _program.Kernel.Parameters.Count, _program.Kernel.Token);
+        SpillStores = lowered.Stores;
+        SpillReloads = lowered.Reloads;
+        return lowered.Module;
     }
 
     private void CheckSemantics()
@@ -1121,7 +1145,7 @@ internal sealed class Lowerer
             return new(low.Index, Owned: false);
         var pair = AllocateRegisterPair(token);
         Add(new(Opcode.Move, Destination: pair, SourceA: low.Index), token);
-        Add(new(Opcode.Move, Destination: checked((byte)(pair + 1)), SourceA: high.Index), token);
+        Add(new(Opcode.Move, Destination: pair + 1, SourceA: high.Index), token);
         return new(pair, Owned: true);
     }
 
@@ -1197,7 +1221,7 @@ internal sealed class Lowerer
             if (binding.OwnsStorage) Release(binding.Value with { Owned = true });
     }
 
-    private void Add(Instruction instruction, Token token)
+    private void Add(VirtualInstruction instruction, Token token)
     {
         if (_instructions.Count >= MaximumInstructions)
             throw Error("CAS202", $"Compiled kernels may contain at most {MaximumInstructions} instructions.", token);
@@ -1210,43 +1234,28 @@ internal sealed class Lowerer
             throw Error("CAS204", "Compiler expansion exceeds 1,000,000 statement/iteration visits.", token);
     }
 
-    private byte AllocateRegister(Token token)
+    private int AllocateRegister(Token token)
     {
-        for (byte index = 0; index < _registers.Length; index++)
-        {
-            if (_registers[index]) continue;
-            _registers[index] = true;
-            TrackRegisterPressure();
-            return index;
-        }
-
-        throw Error("CAS200", "The kernel requires more than 32 vector registers.", token);
+        var index = _registers.Allocate();
+        if (index < 0) throw Error("CAS200", "The kernel exceeds the vector spill slot limit.", token);
+        TrackRegisterPressure();
+        return index;
     }
 
-    private byte AllocateRegisterPair(Token token)
+    private int AllocateRegisterPair(Token token)
     {
-        for (var index = 0; index <= 30; index += 2)
-        {
-            if (_registers[index] || _registers[index + 1]) continue;
-            _registers[index] = true;
-            _registers[index + 1] = true;
-            TrackRegisterPressure();
-            return (byte)index;
-        }
-        throw Error("CAS203", "i32 gather/scatter requires a free even-aligned register pair.", token);
+        var index = _registers.AllocatePair();
+        if (index < 0) throw Error("CAS203", "The kernel exceeds the vector spill slot limit for an address pair.", token);
+        TrackRegisterPressure();
+        return index;
     }
 
-    private byte AllocateMask(Token token)
+    private int AllocateMask(Token token)
     {
-        for (byte index = 0; index < _masks.Length; index++)
-        {
-            if (_masks[index]) continue;
-            _masks[index] = true;
-            TrackRegisterPressure();
-            return index;
-        }
-
-        throw Error("CAS201", "The kernel requires more than eight mask registers.", token);
+        var index = _masks.Allocate();
+        if (index < 0) throw Error("CAS201", "The kernel exceeds the mask spill slot limit.", token);
+        TrackRegisterPressure();
+        return index;
     }
 
     private void Release(Value value)
@@ -1271,8 +1280,8 @@ internal sealed class Lowerer
 
     private void TrackRegisterPressure()
     {
-        PeakVectorRegisters = Math.Max(PeakVectorRegisters, _registers.Count(allocated => allocated));
-        PeakMaskRegisters = Math.Max(PeakMaskRegisters, _masks.Count(allocated => allocated));
+        PeakVectorRegisters = Math.Max(PeakVectorRegisters, _registers.ActiveCount);
+        PeakMaskRegisters = Math.Max(PeakMaskRegisters, _masks.ActiveCount);
     }
 
     private static Opcode VectorOpcode(TokenKind op, SourceType type) => (op, type) switch
@@ -1337,8 +1346,8 @@ internal sealed class Lowerer
     }
 
     private static CompilationFailure Error(string code, string message, Token token) => new(new(code, message, token.Line, token.Column));
-    private readonly record struct Value(SourceType Type, byte Index, bool Owned, ValueBinding? BorrowedFrom = null);
-    private readonly record struct RegisterPair(byte Index, bool Owned);
+    private readonly record struct Value(SourceType Type, int Index, bool Owned, ValueBinding? BorrowedFrom = null);
+    private readonly record struct RegisterPair(int Index, bool Owned);
     private readonly record struct TypeBinding(SourceType Type, bool Mutable);
     private sealed class ValueBinding(Value value, bool mutable, bool ownsStorage, int remainingUses)
     {

@@ -8,5 +8,6 @@
     <ProjectReference Include="..\..\src\Cascade.Runtime\Cascade.Runtime.csproj" />
     <None Update="gather-transform.cascade" CopyToOutputDirectory="PreserveNewest" />
     <None Update="memory-transform.cascade" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="spill-stress.cascade" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

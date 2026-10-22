@@ -1,0 +1,65 @@
+// Register-pressure stress sample: keep 36 vectors and 12 masks live.
+// The compiler uses private CVM1 1.1 slots, never linear memory.
+kernel spill_stress(vector<i32> input) -> vector<i32> {
+    let v0 = input + 0;
+    let v1 = input + 1;
+    let v2 = input + 2;
+    let v3 = input + 3;
+    let v4 = input + 4;
+    let v5 = input + 5;
+    let v6 = input + 6;
+    let v7 = input + 7;
+    let v8 = input + 8;
+    let v9 = input + 9;
+    let v10 = input + 10;
+    let v11 = input + 11;
+    let v12 = input + 12;
+    let v13 = input + 13;
+    let v14 = input + 14;
+    let v15 = input + 15;
+    let v16 = input + 16;
+    let v17 = input + 17;
+    let v18 = input + 18;
+    let v19 = input + 19;
+    let v20 = input + 20;
+    let v21 = input + 21;
+    let v22 = input + 22;
+    let v23 = input + 23;
+    let v24 = input + 24;
+    let v25 = input + 25;
+    let v26 = input + 26;
+    let v27 = input + 27;
+    let v28 = input + 28;
+    let v29 = input + 29;
+    let v30 = input + 30;
+    let v31 = input + 31;
+    let v32 = input + 32;
+    let v33 = input + 33;
+    let v34 = input + 34;
+    let v35 = input + 35;
+    let m0 = input < 0;
+    let m1 = input < 1;
+    let m2 = input < 2;
+    let m3 = input < 3;
+    let m4 = input < 4;
+    let m5 = input < 5;
+    let m6 = input < 6;
+    let m7 = input < 7;
+    let m8 = input < 8;
+    let m9 = input < 9;
+    let m10 = input < 10;
+    let m11 = input < 11;
+    return v0 + v1 + v2 + v3 + v4 + v5 + v6 + v7 + v8 + v9 + v10 + v11 + v12 + v13 + v14 + v15 + v16 + v17 + v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35
+        + select(m0, input, 0)
+        + select(m1, input, 0)
+        + select(m2, input, 0)
+        + select(m3, input, 0)
+        + select(m4, input, 0)
+        + select(m5, input, 0)
+        + select(m6, input, 0)
+        + select(m7, input, 0)
+        + select(m8, input, 0)
+        + select(m9, input, 0)
+        + select(m10, input, 0)
+        + select(m11, input, 0);
+}

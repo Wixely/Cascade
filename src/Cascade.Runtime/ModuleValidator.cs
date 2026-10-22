@@ -6,6 +6,7 @@ public sealed record ValidationError(int InstructionIndex, string Message);
 
 public static class ModuleValidator
 {
+    public const int MaximumDiagnostics = 128;
     public static IReadOnlyList<ValidationError> Validate(CascadeModule module)
     {
         ArgumentNullException.ThrowIfNull(module);
@@ -26,6 +27,7 @@ public static class ModuleValidator
             if (index != 0 && function.Start < previousFunctionEnd)
                 errors.Add(new(-1, $"Function {index} is out of order or overlaps its predecessor."));
             previousFunctionEnd = function.EndExclusive;
+            if (errors.Count >= MaximumDiagnostics) return Truncate(errors);
         }
 
         var importKeys = new HashSet<ImportKey>();
@@ -40,11 +42,22 @@ public static class ModuleValidator
                 errors.Add(new(-1, $"Import {index} fuel cost must be between 1 and 1000000."));
             if (!importKeys.Add(new(import.Namespace, import.Name, import.AbiVersion)))
                 errors.Add(new(-1, $"Import {index} duplicates an earlier capability."));
+            if (errors.Count >= MaximumDiagnostics) return Truncate(errors);
         }
 
         for (var index = 0; index < module.Instructions.Count; index++)
+        {
             ValidateInstruction(module.Instructions[index], index, module, functionStarts, errors);
+            if (errors.Count >= MaximumDiagnostics) return Truncate(errors);
+        }
 
+        return errors;
+    }
+
+    private static IReadOnlyList<ValidationError> Truncate(List<ValidationError> errors)
+    {
+        errors.RemoveRange(MaximumDiagnostics - 1, errors.Count - (MaximumDiagnostics - 1));
+        errors.Add(new(-1, "Validation stopped at the diagnostic limit; further diagnostics may be omitted."));
         return errors;
     }
 
@@ -82,6 +95,26 @@ public static class ModuleValidator
 
         switch (instruction.Opcode)
         {
+            case Opcode.SpillStoreVector:
+                Register(instruction.SourceA, "Source A");
+                if (instruction.Immediate >= (ulong)module.VectorSpillSlots) errors.Add(new(index, "Vector spill slot is out of range."));
+                Unused(instruction.Destination == 0 && instruction.SourceB == 0 && instruction.Mask == 0, "destination, source B, and mask");
+                break;
+            case Opcode.SpillLoadVector:
+                Register(instruction.Destination, "Destination");
+                if (instruction.Immediate >= (ulong)module.VectorSpillSlots) errors.Add(new(index, "Vector spill slot is out of range."));
+                Unused(instruction.SourceA == 0 && instruction.SourceB == 0 && instruction.Mask == 0, "source and mask");
+                break;
+            case Opcode.SpillStoreMask:
+                Mask(instruction.Mask);
+                if (instruction.Immediate >= (ulong)module.MaskSpillSlots) errors.Add(new(index, "Mask spill slot is out of range."));
+                Unused(instruction.Destination == 0 && instruction.SourceA == 0 && instruction.SourceB == 0, "vector register");
+                break;
+            case Opcode.SpillLoadMask:
+                Mask(instruction.Destination);
+                if (instruction.Immediate >= (ulong)module.MaskSpillSlots) errors.Add(new(index, "Mask spill slot is out of range."));
+                Unused(instruction.SourceA == 0 && instruction.SourceB == 0 && instruction.Mask == 0, "source and mask");
+                break;
             case Opcode.Zero:
                 Register(instruction.Destination, "Destination");
                 Unused(instruction.SourceA == 0 && instruction.SourceB == 0 && instruction.Mask == 0 && instruction.Immediate == 0, "source, mask, and immediate");

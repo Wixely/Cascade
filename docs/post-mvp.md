@@ -117,9 +117,19 @@ Packed batching is implemented and measured by `Cascade.Benchmarks --batch`.
 It preserves ordinary restart, memory, trap, and fuel semantics. Its measured
 advantage over manual restart is modest; instance reuse remains the major gain.
 Successful batch items now use value-type internal results, reducing batch
-result allocations to one per successful batch. Evaluate instruction fusion before
-CPU-specific work — Owner: TBD — Due: TBD. Spilling also needs an explicit
-memory-isolation design before implementation — Owner: TBD — Due: TBD.
+result allocations to one per successful batch. An opt-in compare/select dispatch
+fusion prototype now preserves exact state and fuel, with modest synthetic gains.
+Compiled-workload and setup-amortization measurements now show that the benefit
+depends on instance reuse and deployment runtime; the option remains disabled
+by default. Further optimization should start with a concrete application
+workload — Owner: TBD — Due: TBD.
+
+The approved [private-spill extension](decisions/2026-10-22-private-spill-storage.md)
+adds CVM1 1.1 storage and virtual-register lowering without changing 1.0 output
+for existing kernels. Overflow values are saved in private bounded slots rather
+than linear memory. The conservative allocator preserves evaluated snapshots,
+mask widths and aligned address pairs; it favors predictable behavior over
+minimum reload counts. `source-spill` is a runnable stress example.
 
 Release remains a separate user-owned action: perform the privacy review, create
 the public Wixely GitHub repository, and publish the reviewed v0.1 work — Owner:

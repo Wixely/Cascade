@@ -31,7 +31,9 @@ calls.
 
 ## Portable module container
 
-The CLI reads and writes the accepted `CVM1` version 1.0 format. Files contain a
+The MVP baseline is the accepted `CVM1` version 1.0 format. The CLI also supports
+the post-MVP [1.1 private-spill extension](decisions/2026-10-22-private-spill-storage.md),
+selected only when a module declares spill slots. Version 1.0 files contain a
 32-byte header, a 24-byte-per-entry section directory, and canonical aligned
 code, constant, function, and import sections.
 

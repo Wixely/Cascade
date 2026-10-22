@@ -2,6 +2,36 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "Cascade demo: private register spills",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build",
+      "program": "${workspaceFolder}/examples/Cascade.Demos/bin/Debug/net10.0/Cascade.Demos.dll",
+      "args": ["source-spill"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Cascade benchmark: compiled fusion",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build",
+      "program": "${workspaceFolder}/tools/Cascade.Benchmarks/bin/Debug/net10.0/Cascade.Benchmarks.dll",
+      "args": ["--fusion-compiled", "--quick"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Cascade benchmark: dispatch fusion",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build",
+      "program": "${workspaceFolder}/tools/Cascade.Benchmarks/bin/Debug/net10.0/Cascade.Benchmarks.dll",
+      "args": ["--fusion", "--quick"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    },
+    {
       "name": "Cascade compiler: generated differential tests",
       "type": "coreclr",
       "request": "launch",

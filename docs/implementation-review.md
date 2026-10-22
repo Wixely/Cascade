@@ -56,15 +56,75 @@ run was not faster than reference execution, so no universal speedup is claimed.
 This is a focused correctness review, not a claim of exhaustive proof or a
 repository-wide security audit.
 
+## Follow-up review: dispatch fusion and bounded diagnostics
+
+The checkpoint above was committed as `8caa385`. Subsequent work added an
+explicitly opt-in compare/select dispatch experiment, then evaluated compiled
+Game of Life, gather and clamp kernels with instance setup included. The
+experiment preserves architectural mask writes and two fuel charges, takes the
+shortcut only with sufficient fuel, and does not fuse potentially trapping or
+effectful operations. Full-state comparisons cover both widths, aliases,
+mismatched masks, direct branch entry, restart and every nearby fuel boundary.
+
+Compiled measurements do not justify default enablement: Game of Life and
+gather have no eligible pairs, and clamp benefits only when setup is amortized
+under the measured steady-state/native configurations. The option remains off.
+
+This review also found excessive diagnostic accumulation for invalid modules.
+Validation now stops with at most 128 diagnostics, including an explicit final
+truncation notice. Regression cases cover instruction, function and import
+errors and verify bounded embedding exception messages. Valid-module semantics
+are unchanged. This is a diagnostic reporting contract refinement, not a
+change to CVM1 validity or fuel rules.
+
+Before the approved spill extension, follow-up verification passed `eng/verify.ps1` and
+`eng/verify-linux.ps1 -RequireNativeAot`. That checkpoint contained 20 compiler
+cases (including 640 generated kernels), 31 runtime cases (including 1,440
+fusion comparisons), and five backend differential corpora. The updated runtime
+suite also passed a freshly published Windows NativeAOT executable. The compiled
+benchmark and its source assets published and ran on Windows and Linux NativeAOT.
+
+## Completion audit
+
+The user subsequently approved the private-spill extension. Implementation adds
+virtual-index lowering, bounded private slot operations, CVM1 1.1 metadata and
+a runnable source stress demo. Review preserved the original binary constructor
+signature and corrected a compatibility edge: optional type-5 sections in 1.0
+must still be skipped, not reinterpreted as 1.1 spill metadata. Unspilled
+instances use shared empty arrays rather than allocating empty spill banks.
+
+Managed spill acceptance tests now cover 300 live vectors, both vector lane
+types, mask-only and mixed pressure, saved loads across helper writes, sparse
+gather/scatter, all mask widths, slot allocation limits, restart/batch clearing,
+instance isolation and caller-clobbered low-level calls. An older published CLI
+was also exercised against the stress module and rejected version 1.1 explicitly.
+Final spill verification passed on Windows and Linux, managed and NativeAOT:
+24/24 compiler cases and 33/33 runtime conformance cases. Linux's verification
+script also passed the differential corpus, native Game of Life scalar oracle,
+and managed/native CLI compilation and execution of the spill sample. Windows
+published compiler/runtime suites and native spill CLI execution passed. Debug
+and Release builds, formatting, diff whitespace checks, and debug output-path
+checks passed. The package smoke consumer also round-trips and executes a 1.1
+module using the packaged embedding API.
+
+| Requirement | Current evidence / disposition |
+| --- | --- |
+| Build the missing compiler verification and reuse work | Generated scalar oracles, scoped CSE, borrow regression tests and per-block liveness are implemented and passing |
+| Reduce repeated invocation overhead | Packed API, state/fuel/failure tests and allocation benchmark implemented |
+| Evaluate the next dispatch optimization | Opt-in fusion, full-state boundary tests, synthetic and compiled setup-inclusive benchmarks implemented; default remains off |
+| Final code review and fixes | Findings above reproduced and fixed; added bounded validator reporting and metadata regression cases |
+| Windows/Linux and native verification | Current managed scripts and published native suites passed as listed above |
+| Preserve format and capabilities | Approved CVM1 1.1 extension; 1.0 golden bytes and unknown-optional-section behavior preserved, no ambient capabilities |
+| Approved spill implementation | Private storage, explicit operations and virtual-register lowering implemented; acceptance coverage listed above |
+| Publication | User-owned external action; no push performed |
+
 ## Remaining work
 
-- Evaluate instruction fusion with measured workloads and an explicit fuel/trap
-  contract before changing dispatch — Owner: TBD — Due: TBD.
-- Design isolated spill storage before allowing programs to exceed physical
-  register capacity — Owner: TBD — Due: TBD.
+- Further performance changes need an application workload that demonstrates
+  value beyond the measured prototypes — Owner: TBD — Due: TBD.
 - Review the complete outgoing history before public repository creation and
   publication — Owner: User — Due: TBD.
 
-Recommended next action: review and commit this implementation checkpoint,
-then measure a narrowly scoped instruction-fusion prototype — Owner: User for
-commit authorization; TBD for the prototype.
+Recommended next action: review and commit the verified follow-up, then complete
+the separate publication/privacy review when ready — Owner: User for commit and
+publication authorization.

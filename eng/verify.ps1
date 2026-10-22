@@ -21,6 +21,8 @@ try {
     }
     Invoke-Checked { dotnet run --project examples/Cascade.GameOfLife -c Release --no-build -- --benchmark } 'Game of Life oracle'
     Invoke-Checked { dotnet run --project tools/Cascade.Benchmarks -c Release --no-build -- --batch --quick } 'Batch benchmark smoke'
+    Invoke-Checked { dotnet run --project tools/Cascade.Benchmarks -c Release --no-build -- --fusion --quick } 'Fusion benchmark smoke'
+    Invoke-Checked { dotnet run --project tools/Cascade.Benchmarks -c Release --no-build -- --fusion-compiled --quick } 'Compiled fusion benchmark smoke'
 
     $smokeDirectory = Join-Path $repositoryRoot ('artifacts/cli-smoke-' + [Guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $smokeDirectory | Out-Null

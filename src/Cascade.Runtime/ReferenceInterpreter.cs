@@ -10,6 +10,9 @@ public sealed class ReferenceInterpreter : IVmInterpreter
     private readonly HostImportHandler?[] _importBindings;
     private readonly VmTrap? _bindingTrap;
     private readonly IVectorOperations _vectorOperations;
+    private readonly byte[]? _compareSelectWidths;
+    private readonly byte[] _vectorSpills;
+    private readonly PredicateMask[] _maskSpills;
 
     public ReferenceInterpreter(CascadeModule module, VmOptions? options = null) :
         this(module, options, ScalarVectorOperations.Instance)
@@ -28,8 +31,27 @@ public sealed class ReferenceInterpreter : IVmInterpreter
 
         _options = options ?? new VmOptions();
         _options.Validate();
+        if (module.SpillStorageBytes > _options.MaximumSpillBytes)
+            throw new ArgumentException("Module spill storage exceeds the host's spill allocation limit.", nameof(options));
+        _vectorSpills = module.VectorSpillSlots == 0 ? Array.Empty<byte>() : new byte[module.VectorSpillSlots * VectorRegister.ByteCount];
+        _maskSpills = module.MaskSpillSlots == 0 ? Array.Empty<PredicateMask>() : new PredicateMask[module.MaskSpillSlots];
+        Array.Fill(_maskSpills, new PredicateMask(0, 64));
         _vectorOperations = vectorOperations;
         _module = module;
+        if (_options.EnableInstructionFusion)
+        {
+            _compareSelectWidths = new byte[module.Instructions.Count];
+            for (var ip = 0; ip + 1 < module.Instructions.Count; ip++)
+            {
+                var compare = module.Instructions[ip];
+                var select = module.Instructions[ip + 1];
+                if (compare.Mask != select.Mask) continue;
+                if (compare.Opcode is Opcode.CompareEqualI32 or Opcode.CompareLessThanI32 && select.Opcode == Opcode.SelectI32)
+                    _compareSelectWidths[ip] = 4;
+                else if (compare.Opcode is Opcode.CompareEqualI64 or Opcode.CompareLessThanI64 && select.Opcode == Opcode.SelectI64)
+                    _compareSelectWidths[ip] = 8;
+            }
+        }
         State = new VmState(_options.MemorySize, _options.Fuel);
         State.InstructionPointer = module.EntryPoint;
         _importBindings = new HostImportHandler?[module.Imports.Count];
@@ -48,6 +70,8 @@ public sealed class ReferenceInterpreter : IVmInterpreter
     {
         _returnAddresses.Clear();
         State.Restart(_module.EntryPoint);
+        Array.Clear(_vectorSpills);
+        Array.Fill(_maskSpills, new PredicateMask(0, 64));
     }
 
     public ExecutionResult Execute() => ExecuteCore().ToResult();
@@ -64,6 +88,12 @@ public sealed class ReferenceInterpreter : IVmInterpreter
                 return Trapped(TrapCode.InvalidBranchTarget, "Instruction pointer left the code range.");
             if (State.FuelRemaining == 0)
                 return Trapped(TrapCode.FuelExhausted, "Execution fuel was exhausted.");
+
+            if (_compareSelectWidths is not null && _compareSelectWidths[ip] != 0 && State.FuelRemaining >= 2)
+            {
+                ExecuteCompareSelect(ip, _compareSelectWidths[ip] == 4);
+                continue;
+            }
 
             State.FuelRemaining--;
             var instruction = _module.Instructions[ip];
@@ -106,6 +136,10 @@ public sealed class ReferenceInterpreter : IVmInterpreter
                 Opcode.Call => Call(instruction, ref next),
                 Opcode.Return => Return(ref next),
                 Opcode.HostCall => HostCall(instruction),
+                Opcode.SpillStoreVector => SpillStoreVector(instruction),
+                Opcode.SpillLoadVector => SpillLoadVector(instruction),
+                Opcode.SpillStoreMask => SpillStoreMask(instruction),
+                Opcode.SpillLoadMask => SpillLoadMask(instruction),
                 Opcode.Halt => null,
                 _ => new(TrapCode.InvalidInstruction, ip, "Unknown opcode reached execution."),
             };
@@ -116,8 +150,41 @@ public sealed class ReferenceInterpreter : IVmInterpreter
         }
     }
 
+    private void ExecuteCompareSelect(int ip, bool is32)
+    {
+        var compare = _module.Instructions[ip];
+        var select = _module.Instructions[ip + 1];
+
+        // The same-width comparison establishes the mask, so neither operation
+        // can VM-trap. Keep both architectural writes and instruction charges.
+        State.FuelRemaining--;
+        if (is32) CompareI32(compare); else CompareI64(compare);
+        State.InstructionPointer = ip + 1;
+        State.FuelRemaining--;
+        if (is32)
+            _vectorOperations.SelectI32(State.Register(select.Destination), State.Register(select.SourceA), State.Register(select.SourceB), State.Mask(select.Mask).ActiveBits);
+        else
+            _vectorOperations.SelectI64(State.Register(select.Destination), State.Register(select.SourceA), State.Register(select.SourceB), State.Mask(select.Mask).ActiveBits);
+        State.InstructionPointer = ip + 2;
+    }
+
     private ExecutionOutcome Trapped(TrapCode code, string message) =>
         new(false, State.InitialFuel - State.FuelRemaining, new(code, State.InstructionPointer, message));
+
+    private VmTrap? SpillStoreVector(Instruction i)
+    {
+        State.Register(i.SourceA).WriteTo(_vectorSpills.AsSpan((int)i.Immediate * 64, 64));
+        return null;
+    }
+
+    private VmTrap? SpillLoadVector(Instruction i)
+    {
+        State.Register(i.Destination).ReadFrom(_vectorSpills.AsSpan((int)i.Immediate * 64, 64));
+        return null;
+    }
+
+    private VmTrap? SpillStoreMask(Instruction i) { _maskSpills[(int)i.Immediate] = State.Mask(i.Mask); return null; }
+    private VmTrap? SpillLoadMask(Instruction i) { State.SetMask(i.Destination, _maskSpills[(int)i.Immediate]); return null; }
 
     private VmTrap? Zero(Instruction i) { State.Register(i.Destination).Clear(); return null; }
     private VmTrap? Move(Instruction i) { State.Register(i.Destination).CopyFrom(State.Register(i.SourceA)); return null; }

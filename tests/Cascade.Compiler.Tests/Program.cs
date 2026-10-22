@@ -23,6 +23,10 @@ var tests = new (string Name, Action Body)[]
     ("constant selection preserves literal type context", LiteralContext),
     ("compiler bounds source and expansion work", CompilerLimits),
     ("common expressions respect mutation and loop boundaries", CommonExpressions),
+    ("virtual registers spill beyond byte indices deterministically", CompilerSpillChecks.VectorPressure),
+    ("spill snapshots preserve masks, effects and gather pairs", CompilerSpillChecks.MixedPressure),
+    ("mask-only spills retain i32 and i64 widths and aliases", CompilerSpillChecks.MaskPressure),
+    ("i64 spills preserve inactive gather lanes and sparse writes", CompilerSpillChecks.I64MemoryPressure),
 };
 
 var failures = 0;

@@ -11,6 +11,7 @@ var demos = new Dictionary<string, (string Description, Action Run)>(StringCompa
     ["capability"] = ("An explicitly declared and bound host capability", RunCapability),
     ["source"] = ("Compile functions, bounded repetition, and typed memory from source", RunSourceKernel),
     ["source-gather"] = ("Compile typed gather/scatter and mask combinators from source", RunSourceGather),
+    ["source-spill"] = ("Compile high-pressure vectors and masks to private CVM1 1.1 slots", RunSourceSpill),
 };
 
 if (args is ["list"])
@@ -44,6 +45,31 @@ foreach (var name in selectedNames)
 
 Console.WriteLine($"PASS {selectedNames.Length} demo(s)");
 return 0;
+
+static void RunSourceSpill()
+{
+    var source = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "spill-stress.cascade"));
+    var compiled = CascadeCompiler.Compile(source);
+    if (!compiled.Succeeded) throw new InvalidOperationException(string.Join("; ", compiled.Diagnostics));
+    var program = CascadeProgram.FromModule(compiled.Module!);
+    if (program.VectorSpillSlots == 0 || program.MaskSpillSlots == 0) throw new InvalidOperationException("Expected both spill banks.");
+    foreach (var backend in SimdInterpreter.IsSupported
+        ? new[] { ExecutionBackend.Reference, ExecutionBackend.HardwareSimd } : [ExecutionBackend.Reference])
+    {
+        var instance = program.Instantiate(new VmOptions { MemorySize = 0 }, backend);
+        for (var lane = 0; lane < 16; lane++) instance.State.Register(0).WriteUInt32(lane, unchecked((uint)(lane - 8)));
+        if (!instance.Execute().Succeeded) throw new InvalidOperationException("Spill demo trapped.");
+        for (var lane = 0; lane < 16; lane++)
+        {
+            var input = lane - 8;
+            var expected = 36 * input + 630 + input * Enumerable.Range(0, 12).Count(threshold => input < threshold);
+            Equal(expected, unchecked((int)instance.State.Register(0).ReadUInt32(lane)), $"spill lane {lane}");
+        }
+        Console.WriteLine($"{backend}: {Format(ReadI32(instance.State.Register(0)))}");
+    }
+    Console.WriteLine($"CVM1 1.1: {program.VectorSpillSlots} vector slots, {program.MaskSpillSlots} mask slots, {program.SpillStorageBytes} private bytes");
+    Console.WriteLine($"{compiled.Metrics!.SpillStores} stores and {compiled.Metrics.SpillReloads} reloads; zero linear-memory bytes");
+}
 
 static void RunArithmetic()
 {

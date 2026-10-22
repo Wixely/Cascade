@@ -39,4 +39,8 @@ public enum Opcode : ushort
     Return = 0x0064,
     Halt = 0x0065,
     HostCall = 0x0070,
+    SpillStoreVector = 0x0080,
+    SpillLoadVector = 0x0081,
+    SpillStoreMask = 0x0082,
+    SpillLoadMask = 0x0083,
 }

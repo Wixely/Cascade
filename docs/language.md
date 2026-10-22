@@ -163,7 +163,23 @@ Successful compilation reports instruction count and peak allocated vector and
 mask registers through `CompilationResult.Metrics`. The CLI and source demos
 display the same measurements. Common-expression reuse currently requires an
 available immutable binding in the lexical scope; it does not move loads or
-helper calls. Register spilling and instruction scheduling remain unimplemented.
+helper calls. Instruction scheduling remains unimplemented.
+
+Lowering uses integer-indexed virtual instructions. Kernels fitting the original
+register banks retain their existing CVM1 1.0 instruction stream. High-pressure
+kernels use CVM1 1.1 private slots: the vector overflow path retains v0-v23 as
+fixed homes and uses v24-v28 as scratch; the mask overflow path retains k0-k5
+and uses k6-k7 as scratch. Overflow values are stored after writes and reloaded
+before reads. Address pairs remain even-aligned. Spilling snapshots evaluated
+values; it never reserves user linear memory or replays loads/helper effects.
+
+`CompilationResult.Metrics` reports vector/mask slot counts, spill stores and
+reloads, and peak virtual pressure. For spilling kernels, the existing physical
+peak fields are conservative architectural-bank ceilings, not an optimal live
+interval allocation count. The allocator is deterministic but deliberately
+conservative; heavy spilling adds instructions and therefore consumes more fuel.
+Expanded bytecode remains bounded to 1,000,000 instructions, and each slot bank
+to 65,536 entries. Exceeding these bounds produces compiler diagnostics.
 
 `CompilationOptions.Optimize = false` or CLI `--no-optimize` bypasses the typed
 IR transformations for diagnosis and differential testing. Deterministic local
@@ -210,5 +226,6 @@ line. Diagnostics include a stable code plus one-based line and column.
 
 Language version 0.3 intentionally has no data-dependent branches, dynamic
 loops, imports, casts, mask parameters, or mask returns. The compiler performs
-deterministic typed-IR optimization and temporary-register allocation but does
-not spill.
+deterministic typed-IR optimization and virtual-register allocation with private
+spilling. Its source syntax is unchanged; only kernels needing slots require a
+CVM1 1.1-capable runtime.
